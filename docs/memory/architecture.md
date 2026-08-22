@@ -18,6 +18,7 @@
 - /.well-known/oauth-protected-resource, /.well-known/oauth-authorization-server, /oauth/register, /authorize (consent), /token, /revoke. <!-- k:OAuth endpoints -->
 - Now accepts OAuth tokens OR static bearer; returns WWW-Authenticate header for clients to detect OAuth support. <!-- k:GET /mcp -->
 - OAuth service (DCR, PKCE S256, token storage) and HTTP routes for single-user register-authorize-token-revoke flow <!-- k:src/oauth/ -->
+- Episode deduplication now scopes to session_id; repeat Stop hooks update the same episode rather than create duplicates. <!-- k:src/core/remember.ts -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -27,6 +28,8 @@
 - Non-empty deferred creates type=todo record linked by session; todo closure auto-chains to origin episode. <!-- k:deferred→todo chain -->
 - memories (with refs, note, related, episode.commits fields), projects, oauth (token store), events (metrics), plus pipeline:hybrid-rrf <!-- k:Indices -->
 - Episodes merge on source.session_id (one per session), facts merge on content_hash, todos spawn from deferred field <!-- k:Session-scoped dedupe -->
+- Subobject tracking git commits attached to episodes, indexed for recall. <!-- k:episode.commits -->
+- Bidirectional links to related records (up to 5 per write) via cosine similarity. <!-- k:related (keyword field) -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -35,10 +38,14 @@
 - File-context recall on Edit|Write|MultiEdit|Bash; emits additionalContext JSON to Claude. <!-- k:PreToolUse hook -->
 - SessionStart prints timeline, Stop hook journals episode+ADRs+facts+architecture patch+git commit, PreToolUse injects file context <!-- k:Claude Code hooks -->
 - Auto-attaches commits to active episodes or creates lightweight episode, idempotent on SHA, skips memory:* commits <!-- k:Git post-commit -->
+- Edit|Write|MultiEdit and Bash hooks emit PreToolUse JSON with file-context results (cached per session). <!-- k:Pre-tool recall hooks -->
+- Server-side ingestion via POST /api/ingest/commit, indexed with sha, message, files, stat. <!-- k:Git post-commit hook -->
 <!-- memory:end Integrations -->
 
 ## Infrastructure
 <!-- memory:begin Infrastructure -->
+- OpenSearch index persisting DCR clients, authorization codes, access/refresh tokens, with SHA-256 hashing and family revocation. <!-- k:oauth index -->
+- Query metrics: recall count, zero-result %, latency p50/p95, pre-tool hit/miss, writes by source_kind. <!-- k:events index -->
 <!-- memory:end Infrastructure -->
 
 ## Config

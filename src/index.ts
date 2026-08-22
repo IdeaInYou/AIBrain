@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
-import { config } from './config.js';
+import { OAUTH, OAUTH_ENABLED, config } from './config.js';
+import { purgeExpired } from './oauth/store.js';
 import { warmEmbedder } from './embed/embedder.js';
 import { logger } from './logger.js';
 import { createApp } from './http/app.js';
@@ -18,6 +19,13 @@ async function bootstrap(): Promise<void> {
     await server.connect(new StdioServerTransport());
     logger.info('mcp server listening on stdio');
     return;
+  }
+
+  if (OAUTH_ENABLED) {
+    await purgeExpired();
+    logger.info({ issuer: OAUTH.issuer, resource: OAUTH.resource }, 'oauth enabled');
+  } else {
+    logger.warn('PUBLIC_URL is not set — OAuth disabled, static bearer token only (no claude.ai web/mobile)');
   }
 
   const app = createApp();

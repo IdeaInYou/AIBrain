@@ -24,6 +24,28 @@ const Schema = z.object({
   SUMMARY_MAX_EPISODES: z.coerce.number().int().positive().default(15),
   RECALL_DEFAULT_K: z.coerce.number().int().positive().default(8),
   DEFAULT_PROJECT: z.string().default('general'),
+  /** Looser than DEDUPE_THRESHOLD on purpose: "about the same thing", not "the same thing". */
+  RELATED_THRESHOLD: z.coerce.number().min(0).max(1).default(0.75),
+  RELATED_MAX: z.coerce.number().int().positive().max(10).default(5),
+  /** Metrics are cheap but not free; turn off if the write volume ever matters. */
+  METRICS_ENABLED: z
+    .string()
+    .optional()
+    .transform(v => v !== 'false' && v !== '0'),
+
+  /**
+   * External origin, e.g. https://memory.example.com. OAuth is enabled only when
+   * this is set: every discovery document has to advertise absolute URLs, and
+   * guessing them from the request Host header is spoofable.
+   */
+  PUBLIC_URL: z
+    .url()
+    .optional()
+    .transform(v => v?.replace(/\/+$/, '')),
+  /** Password for the OAuth consent screen. Falls back to MCP_AUTH_TOKEN. */
+  OAUTH_PASSWORD: z.string().optional(),
+  OAUTH_ACCESS_TTL: z.coerce.number().int().positive().default(3600),
+  OAUTH_REFRESH_TTL: z.coerce.number().int().positive().default(30 * 24 * 3600),
 });
 
 export type Config = z.infer<typeof Schema>;
@@ -47,6 +69,28 @@ export const config = load();
 export const INDEX = {
   memories: `${config.INDEX_PREFIX}memories`,
   projects: `${config.INDEX_PREFIX}projects`,
+  oauth: `${config.INDEX_PREFIX}oauth`,
+  events: `${config.INDEX_PREFIX}events`,
+} as const;
+
+/**
+ * OAuth is what makes claude.ai web and mobile possible — those surfaces reach
+ * the server from Anthropic's cloud and cannot carry a locally-configured
+ * header. Without PUBLIC_URL the server stays static-bearer only.
+ */
+export const OAUTH_ENABLED = Boolean(config.PUBLIC_URL);
+
+export const oauthPassword = (): string => config.OAUTH_PASSWORD || config.MCP_AUTH_TOKEN;
+
+export const OAUTH = {
+  issuer: config.PUBLIC_URL ?? '',
+  /** Must match the URL the user types into the connector dialog, path included. */
+  resource: `${config.PUBLIC_URL ?? ''}/mcp`,
+  authorizationEndpoint: `${config.PUBLIC_URL ?? ''}/oauth/authorize`,
+  tokenEndpoint: `${config.PUBLIC_URL ?? ''}/oauth/token`,
+  registrationEndpoint: `${config.PUBLIC_URL ?? ''}/oauth/register`,
+  protectedResourceMetadata: `${config.PUBLIC_URL ?? ''}/.well-known/oauth-protected-resource`,
+  scopes: ['mcp', 'offline_access'] as const,
 } as const;
 
 export const SEARCH_PIPELINE = `${config.INDEX_PREFIX}hybrid-rrf`;
@@ -56,6 +100,9 @@ export const SERVER_VERSION = '1.0.0';
 
 export const LIMITS = {
   contentChars: 2000,
+  /** Full note markdown — large, but never indexed or embedded. */
+  noteChars: 20_000,
+  maxRefs: 20,
   recallK: 30,
   ingestBytes: 2 * 1024 * 1024,
   ingestFacts: 500,

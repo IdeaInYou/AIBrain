@@ -33,6 +33,10 @@ export function memoriesMapping(dim: number) {
             outcome: { type: 'text', analyzer: 'english' },
             deferred: { type: 'text', analyzer: 'english' },
             files: { type: 'keyword' },
+            commits: {
+              type: 'object',
+              properties: { sha: { type: 'keyword' }, message: { type: 'text', analyzer: 'english' } },
+            },
           },
         },
         source: {
@@ -44,6 +48,11 @@ export function memoriesMapping(dim: number) {
             session_id: { type: 'keyword' },
           },
         },
+        related: { type: 'keyword' },
+        refs: { type: 'keyword' },
+        // Stored for retrieval but never indexed: notes are large, and search
+        // goes through `content`. Chunked note search is a separate patch.
+        note: { type: 'text', index: false },
         occurred_at: { type: 'date' },
         created_at: { type: 'date' },
         content_hash: { type: 'keyword' },
@@ -61,6 +70,47 @@ export const projectsMapping = {
       repo_names: { type: 'keyword' },
       aliases: { type: 'keyword' },
       last_activity: { type: 'date' },
+    },
+  },
+};
+
+/** OAuth clients, codes and tokens. Persisted so a redeploy does not sign devices out. */
+export const oauthMapping = {
+  settings: { index: { number_of_shards: 1, number_of_replicas: 0 } },
+  mappings: {
+    properties: {
+      kind: { type: 'keyword' },
+      client_id: { type: 'keyword' },
+      client_name: { type: 'keyword' },
+      redirect_uris: { type: 'keyword' },
+      redirect_uri: { type: 'keyword' },
+      code_challenge: { type: 'keyword' },
+      code_challenge_method: { type: 'keyword' },
+      scope: { type: 'keyword' },
+      resource: { type: 'keyword' },
+      family: { type: 'keyword' },
+      created_at: { type: 'date' },
+      expires_at: { type: 'date' },
+    },
+  },
+};
+
+/** Usage metrics. No memory content ever lands here — only shapes and timings. */
+export const eventsMapping = {
+  settings: { index: { number_of_shards: 1, number_of_replicas: 0 } },
+  mappings: {
+    properties: {
+      ts: { type: 'date' },
+      kind: { type: 'keyword' },
+      client: { type: 'keyword' },
+      project: { type: 'keyword' },
+      source_kind: { type: 'keyword' },
+      k: { type: 'integer' },
+      hits: { type: 'integer' },
+      latency_ms: { type: 'integer' },
+      query_len: { type: 'integer' },
+      top_score: { type: 'float' },
+      cached: { type: 'boolean' },
     },
   },
 };
@@ -96,6 +146,8 @@ export async function ensureIndices(): Promise<Record<string, string>> {
   const result: Record<string, string> = {
     [INDEX.memories]: await ensureIndex(INDEX.memories, memoriesMapping(config.EMBED_DIM)),
     [INDEX.projects]: await ensureIndex(INDEX.projects, projectsMapping),
+    [INDEX.oauth]: await ensureIndex(INDEX.oauth, oauthMapping),
+    [INDEX.events]: await ensureIndex(INDEX.events, eventsMapping),
   };
 
   await osRequest('PUT', `/_search/pipeline/${SEARCH_PIPELINE}`, hybridPipeline);

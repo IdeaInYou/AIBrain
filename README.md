@@ -1,140 +1,156 @@
 # Claude Memory MCP
 
-Довгострокова пам'ять для Claude: MCP-сервер на Node/TS поверх OpenSearch, на власному VPS, доступний з усіх пристроїв (claude.ai web/mobile/desktop, Claude Code, Claude Desktop). Один користувач, нуль платних API.
+Long-term memory for Claude: an MCP server on Node/TypeScript over OpenSearch, self-hosted, reachable from every device — claude.ai web and mobile, Claude Desktop, Claude Code. Single user, no paid APIs.
 
-Мета — щоб Claude через місяць пам'ятав, **що ми робили і нащо**. Це не повна база знань про проєкти, а журнал сесій + ключові рішення.
-
----
-
-## 1. Принципи
-
-- **Episode — основна одиниця.** Одна сесія роботи → одна нотатка: що робили, чому, результат, що відклали. Пишеться Stop-хуком автоматично, не залежить від того, чи «згадала» модель.
-- **Facts — другорядні.** 0–5 рішень/преференцій на сесію, якщо були. Без спроби витягти все.
-- **English-only storage.** Хук і описи тулів перекладають на вході. Сервер не знає про інші мови.
-- **Recency > importance.** Те, що було місяць тому, — зверху; пів року тому — нижче.
-- **Сервер не думає.** Зберігає і шукає. Жодного виклику LLM: немає `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `OPENAI_API_KEY`. Ембединги — локальна ONNX-модель у тому ж процесі.
-- **LLM тільки через офіційний Claude Code** на моїх пристроях — хуки й slash-команди, у межах підписки. OAuth-токен ніколи не залишає Claude Code.
-- **Summary = шаблонна хронологія**, без LLM-перебудови.
-- **Claude ніколи не стартує з нуля** — `memory_summary` без аргументів на початку кожної розмови.
+The goal is that a month from now Claude remembers **what we did and why**. This is not a complete knowledge base about your projects; it is a journal of work sessions plus the decisions that came out of them.
 
 ---
 
-## 2. Стек
+## 1. Principles
 
-| Шар | Технологія |
+- **The episode is the unit.** One work session becomes one note: what was done, why, the outcome, what was deferred. Written automatically by a `Stop` hook — it does not depend on the model choosing to remember.
+- **Facts are secondary.** Zero to five decisions or preferences per session, if there were any. No attempt to extract everything.
+- **English-only storage.** The hook and the tool descriptions translate on the way in. The server knows nothing about other languages.
+- **Recency beats importance** for episodes; decisions do not decay at all.
+- **The server does not think.** It stores and searches. No LLM call anywhere in it — no `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, or `OPENAI_API_KEY`. Embeddings run locally as an ONNX model in the same process.
+- **LLM work happens only in Claude Code** on your own machines, inside your subscription, through hooks and slash commands.
+- **Summaries are templates, not generated prose.**
+- **Claude never starts from nothing** — `memory_summary` with no arguments at the start of every conversation.
+- **Notes live in the repo too.** Each session leaves a markdown file under `docs/memory/`, and the memory record links to it.
+
+---
+
+## 2. Stack
+
+| Layer | Technology |
 |---|---|
 | Runtime | Node 22, TypeScript, ESM |
-| MCP | `@modelcontextprotocol/server` v2, транспорт Streamable HTTP (stdio лише для dev) |
+| MCP | `@modelcontextprotocol/server` v2, Streamable HTTP (stdio for dev only) |
 | HTTP | Hono + `@hono/node-server` |
-| Пошук | OpenSearch 2.x, `k-NN` + `neural-search` (hybrid query), аналізатор `english` |
-| Ембединги | `@huggingface/transformers` (ONNX, CPU), `BAAI/bge-base-en-v1.5`, 768 dim |
-| Валідація | zod v4 |
-| Логи | pino |
-| Auth | Bearer, `MCP_AUTH_TOKEN` |
-| Деплой | Docker Compose, Traefik v3 |
-| Клієнт | bash + `claude` CLI у `~/.claude/` |
+| Search | OpenSearch 2.x, `k-NN` + `neural-search` (hybrid query), `english` analyzer |
+| Embeddings | `@huggingface/transformers` (ONNX, CPU), `BAAI/bge-base-en-v1.5`, 768 dim |
+| Validation | zod v4 |
+| Logging | pino |
+| Auth | Bearer token, plus OAuth 2.1 for claude.ai web/mobile |
+| Deploy | Docker Compose, Traefik v3, GitHub Actions on a self-hosted runner |
+| Client | bash + the `claude` CLI, in `~/.claude/` |
 
-VPS: 2 vCPU / 4 GB. OpenSearch 1 GB heap, Node ~500 MB з моделлю.
+VPS: 2 vCPU / 4 GB. OpenSearch 1 GB heap, Node ~500 MB with the model loaded.
 
 ---
 
-## 3. Швидкий старт
+## 3. Quick start
 
-### Сервер
+### Server
 
 ```bash
-cp .env.example .env
-# MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-docker compose up -d          # перший старт тягне ~450 MB моделі у volume model-cache
+cp .env.example .env          # set MCP_AUTH_TOKEN=$(openssl rand -hex 32)
+                              # set PUBLIC_URL to enable OAuth (needed for web/mobile)
+docker compose up -d          # first boot downloads ~450 MB of model into the model-cache volume
 curl -s localhost:3000/health | jq
 ```
 
-Локальна розробка без Docker:
+Local development without Docker:
 
 ```bash
 npm install
 npm run dev                   # tsx watch, HTTP
-npm run dev:stdio             # stdio — для MCP Inspector
-npm run init-index            # створити індекси та search pipeline вручну
+npm run dev:stdio             # stdio — for MCP Inspector
 npm test
 ```
 
-Індекси створюються автоматично на старті; `init-index` потрібен лише для окремого прогону.
+Indices and the search pipeline are created automatically at boot. `npm run init-index` exists for running that step alone.
 
-### Клієнт
+### Claude Code
 
-Див. [claude-code/README.md](claude-code/README.md). Коротко:
+See [claude-code/README.md](claude-code/README.md). In short:
 
 ```bash
 cp -r claude-code/{hooks,prompts,commands} ~/.claude/
-cp claude-code/memory.env.example ~/.claude/memory.env   # заповнити MEMORY_URL, MEMORY_TOKEN
+cp claude-code/memory.env.example ~/.claude/memory.env   # fill in MEMORY_URL, MEMORY_TOKEN
 chmod +x ~/.claude/hooks/*.sh
-# змерджити claude-code/settings.hooks.json у ~/.claude/settings.json
 
+# merge claude-code/settings.hooks.json into ~/.claude/settings.json
 claude mcp add --scope user --transport http memory https://memory.<domain>/mcp \
   --header "Authorization: Bearer <token>"
+
+# per repo, optional: send commits to memory as well
+claude-code/git/install-hook.sh
 ```
 
-### claude.ai / Claude Desktop
+Paste the block from [claude-code/CLAUDE.memory.md](claude-code/CLAUDE.memory.md) into each repo's `CLAUDE.md`. It is reinforcement, not the mechanism — nothing breaks without it.
 
-Settings → Connectors → Add custom connector → `https://memory.<domain>/mcp`, Bearer token. Хуків там немає, тому факти пишуться через `memory_remember` під час розмови — описи тулів самі це вимагають.
+### claude.ai and Claude Desktop
+
+Customize → Connectors → Add custom connector → `https://memory.<domain>/mcp` → Connect. Leave the OAuth Client ID and Secret fields empty; the server supports dynamic client registration and issues its own. The consent screen asks for `OAUTH_PASSWORD` (defaults to `MCP_AUTH_TOKEN`). See §10.
+
+There are no hooks on those surfaces, so memories are written through `memory_remember` during conversation — the tool descriptions push Claude to do that unprompted.
 
 ---
 
-## 4. Структура репозиторію
+## 4. Repository layout
 
 ```
-├── docker-compose.yml
+├── docker-compose.yml            # local / single-host
+├── deploy/docker-compose.yml     # server-side: pulls the built image
 ├── Dockerfile
-├── .env.example
+├── .github/workflows/            # build → push → deploy over SSH
 ├── src/
-│   ├── index.ts                 # warm embedder → init indices → http
-│   ├── config.ts                # env → typed config (zod), INDEX, LIMITS
-│   ├── logger.ts                # pino; на stdio пише в stderr
+│   ├── index.ts                  # warm embedder → init indices → serve
+│   ├── config.ts                 # env → typed config (zod), INDEX, LIMITS, OAUTH
+│   ├── logger.ts                 # pino; writes to stderr under stdio transport
 │   ├── types.ts
 │   ├── mcp/
-│   │   ├── server.ts            # McpServer + instructions
-│   │   ├── instructions.ts      # SERVER_INSTRUCTIONS (§6.2)
+│   │   ├── server.ts             # McpServer + instructions
+│   │   ├── instructions.ts       # SERVER_INSTRUCTIONS, pinned by a test
 │   │   ├── tools/{summary,recall,remember,update,forget}.ts
-│   │   ├── resources.ts
-│   │   └── prompts.ts           # start_session
+│   │   ├── resources.ts          # memory://summary | projects | notes/{id} | preferences
+│   │   └── prompts.ts            # start_session
 │   ├── search/
-│   │   ├── client.ts            # OpenSearch client + osRequest
-│   │   ├── indices.ts           # mappings + search pipeline
-│   │   ├── hybrid.ts            # hybrid query, RRF fallback, knn, listMemories
-│   │   ├── dedupe.ts            # normalize, hash, cosine, near-duplicate
-│   │   └── rerank.ts            # per-type decay
-│   ├── embed/
-│   │   ├── embedder.ts          # інтерфейс, singleton, warm
-│   │   └── local.ts             # transformers.js, bge
+│   │   ├── client.ts             # OpenSearch client, osRequest, osExists
+│   │   ├── indices.ts            # mappings + search pipeline
+│   │   ├── hybrid.ts             # hybrid query, RRF fallback, knn, listMemories
+│   │   ├── dedupe.ts             # normalize, hash, cosine, near-duplicate
+│   │   └── rerank.ts             # per-type decay
+│   ├── embed/{embedder,local}.ts # interface + singleton; transformers.js, bge
 │   ├── core/
-│   │   ├── remember.ts          # єдиний write-path: MCP + REST
-│   │   ├── memory.ts            # recall, update, forget, вибірки
-│   │   ├── summary.ts           # шаблонна хронологія
-│   │   ├── ingest.ts            # episode + facts за раз
-│   │   └── projects.ts          # реєстр проєктів, aliases, repo_names
+│   │   ├── remember.ts           # the single write path: MCP + REST
+│   │   ├── memory.ts             # recall, update, forget, queries
+│   │   ├── summary.ts            # template chronology
+│   │   ├── ingest.ts             # episode + facts in one call
+│   │   ├── commits.ts            # git commits → attach or create
+│   │   ├── related.ts            # bidirectional links between memories
+│   │   ├── fileContext.ts        # "why did this file change before?"
+│   │   ├── events.ts             # usage metrics + /api/stats aggregation
+│   │   └── projects.ts           # project registry, aliases, repo_names
+│   ├── oauth/{service,store}.ts  # PKCE, DCR, token rotation, OpenSearch-backed
 │   └── http/
-│       ├── app.ts               # Hono, Bearer middleware
-│       └── routes/{mcp,ingest,summary,projects,health}.ts
+│       ├── app.ts                # Hono, dual-credential auth middleware
+│       └── routes/{mcp,ingest,summary,projects,file-context,stats,oauth,health}.ts
 ├── scripts/
 │   ├── init-index.ts
-│   ├── reindex.ts               # при зміні моделі ембедингів
-│   └── backup.sh                # snapshot OpenSearch
-├── claude-code/                 # → ~/.claude/ на кожному пристрої
+│   ├── reindex.ts                # after changing the embedding model
+│   ├── migrate-episodes.ts       # one-off: collapse pre-dedupe episode duplicates
+│   └── backup.sh                 # OpenSearch snapshots
+├── claude-code/                  # copied to ~/.claude/ on each device
 │   ├── README.md
+│   ├── CLAUDE.memory.md          # block to paste into each repo's CLAUDE.md
 │   ├── memory.env.example
 │   ├── settings.hooks.json
-│   ├── hooks/{lib.sh,memory-context.sh,memory-extract.sh}
+│   ├── hooks/{lib.sh, memory-context.sh, memory-extract.sh,
+│   │          memory-pretool.sh, memory-pretool-bash.sh, render.mjs}
+│   ├── git/{post-commit, install-hook.sh}
 │   ├── commands/memory-log.md
 │   └── prompts/extract.txt
+├── docs/archive/                 # superseded design documents
 └── test/
 ```
 
 ---
 
-## 5. Дані
+## 5. Data
 
-### 5.1 Індекс `memories`
+### 5.1 `memories`
 
 ```jsonc
 {
@@ -150,46 +166,62 @@ Settings → Connectors → Add custom connector → `https://memory.<domain>/mc
     "importance":    { "type": "byte" },      // 1..5, default 3
     "status":        { "type": "keyword" },   // active | superseded | done | deleted
     "superseded_by": { "type": "keyword" },
-    "episode":       { "type": "object", "properties": {   // лише для type=episode
+    "episode":       { "type": "object", "properties": {   // type=episode only
         "did": {...}, "why": {...}, "outcome": {...}, "deferred": {...},
-        "files": { "type": "keyword" } }},
+        "files":   { "type": "keyword" },
+        "commits": { "sha": "keyword", "message": "text" } }},
     "source":        { "type": "object", "properties": {
-        "kind":       { "type": "keyword" },  // hook | tool | command
-        "client":     { "type": "keyword" },  // claude-code | claude-ai | claude-desktop
+        "kind":       { "type": "keyword" },  // hook | tool | command | git
+        "client":     { "type": "keyword" },  // claude-code | claude-ai | claude-desktop | git
         "device":     { "type": "keyword" },
         "session_id": { "type": "keyword" } }},
-    "occurred_at":   { "type": "date" },      // коли це відбулося (дата сесії) — керує recency
+    "related":       { "type": "keyword" },   // ids of neighbouring memories, symmetric
+    "refs":          { "type": "keyword" },   // repo-relative note paths
+    "note":          { "type": "text", "index": false },  // full markdown, retrievable not searchable
+    "occurred_at":   { "type": "date" },      // when the work happened — drives recency
     "created_at":    { "type": "date" },
     "content_hash":  { "type": "keyword" }
   }}
 }
 ```
 
-Для `episode` поле `content` = склеєний `did + why + outcome + deferred` (для пошуку); структуровані поля — для відображення.
+For an episode, `content` is `did + why + outcome + deferred` concatenated for search; the structured fields are for display.
 
-### 5.2 Індекс `projects`
+### 5.2 `projects`
 
-`slug`, `name`, `repo_names[]`, `aliases[]`, `last_activity`. Створюється автоматично при першому записі в проєкт; `last_activity` рухається тільки вперед.
+`slug`, `name`, `repo_names[]`, `aliases[]`, `last_activity`. Created on first write to a project; `last_activity` only ever moves forward. Teach it your git remotes once and `detect_project` stops guessing:
 
-Індекси `summaries` і `sessions` не потрібні: summary — шаблон, транскрипти залишаються на пристрої.
+```bash
+curl -X PUT "$MEMORY_URL/api/projects/open-chance" \
+  -H "Authorization: Bearer $MEMORY_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Open Chance","repo_names":["OpenChance"],"aliases":["openchance"]}'
+```
+
+### 5.3 `oauth` and `events`
+
+`oauth` holds registered clients, authorization codes, and tokens — all secrets stored as SHA-256 hashes, in OpenSearch rather than memory so a redeploy does not sign every device out.
+
+`events` holds usage metrics: `ts, kind, client, project, source_kind, k, hits, latency_ms, query_len, top_score, cached`. **No memory content ever lands there.**
+
+There is no `summaries` or `sessions` index: summaries are templates, and transcripts stay on the device.
 
 ---
 
-## 6. MCP-інтерфейс
+## 6. MCP interface
 
-Сервер **самоописовий**: уся поведінкова інструкція живе в `instructions` і описах тулів, тому працює однаково в claude.ai, Claude Code і Claude Desktop без жодних налаштувань на боці клієнта.
+The server is **self-describing**: all behavioural guidance lives in `instructions` and the tool descriptions, so it behaves the same in claude.ai, Claude Desktop, and Claude Code with no client-side configuration.
 
-### 6.1 Чому це працює
+### 6.1 Why that works
 
-Кожен MCP-клієнт передає Claude: server `instructions` (з `initialize`), `name` + `description` + JSON-схему кожного тулу, лістинг resources і prompts. Тригерного рушія немає — Claude вирішує викликати тул, читаючи ці тексти. Тому:
+Every MCP client passes Claude the server `instructions` from `initialize`, each tool's `name`, `description`, and JSON schema, and the resource and prompt listings. There is no trigger engine — Claude decides to call a tool by reading those. Therefore:
 
-- описи пишуться як **тригери** («ALWAYS call before X»), не як фічі («allows searching»);
-- перший тул, який Claude має викликати, **не має обов'язкових аргументів** — щоб не було приводу вагатися;
-- `instructions` дублює ті самі правила для клієнтів, які його поважають.
+- Descriptions are written as **triggers** ("ALWAYS call before X"), not features ("allows searching").
+- The first tool Claude should call takes **no required arguments**, so there is no reason to hesitate.
+- `instructions` repeats the same rules for clients that honour it.
 
-### 6.2 Server `instructions`
+### 6.2 Server instructions
 
-Текст — в [src/mcp/instructions.ts](src/mcp/instructions.ts) як єдина константа, щоб тест на дрейф міг її зафіксувати:
+Kept as a single constant in [src/mcp/instructions.ts](src/mcp/instructions.ts) so a test can pin it against drift:
 
 ```text
 This server is the user's long-term memory across all their projects and conversations. …
@@ -205,29 +237,35 @@ Never assume you remember something this server did not return.
 Memory is stored in English. …
 ```
 
-Ім'я сервера — `memory` (не `claude-memory`, не `brain`), тому тули рендеряться як `memory_*` і префікс сам себе документує.
+The server is named `memory`, so tools render as `memory_*` and the prefix documents itself.
 
-### 6.3 Тули
+### 6.3 Tools
 
-| Тул | Роль |
+| Tool | Role |
 |---|---|
-| `memory_summary` | **Точка входу.** Без обов'язкових аргументів (`project?`, `days?`). Повертає шаблонну хронологію. |
-| `memory_recall` | Пошук. Query **англійською** — тул сам вимагає перекласти питання. |
-| `memory_remember` | Запис. `content` англійською; `type=episode` бере структурований об'єкт `episode`. |
-| `memory_update` | Правка за id; `status: "done"` закриває todo. |
-| `memory_forget` | Soft delete за id або фільтром. |
+| `memory_summary` | **Entry point.** No required arguments (`project?`, `days?`). Returns the template chronology. |
+| `memory_recall` | Search. Query must be in English — the tool tells Claude to translate. Supports `since`/`until`. |
+| `memory_remember` | Write. `content` in English; `type=episode` takes a structured `episode` object; `refs`/`note` link repo files. |
+| `memory_update` | Amend by id; `status: "done"` closes a todo. |
+| `memory_forget` | Soft delete by id or filter. |
 
-`memory_ingest` з v1 **видалено** — екстракція відбувається в Claude Code.
+Every description is capped at 400 characters, enforced by a test.
 
-Формат `memory_summary`:
+`memory_summary` returns:
 
 ```markdown
 ## Last 30 days
-- 2026-08-20 · getcheckout · Fixed country-detection cookie precedence. Deferred: Adyen multi-currency.
-- 2026-08-18 · open-chance · Confirmed GSC indexing works after cold start.
+- 2026-08-22 · aibrain · Deployed the memory server behind Traefik. → docs/memory/sessions/2026-08-22-a1b2c3d4.md
+
+## Earlier (by month)
+### 2026-07
+- 2026-07-14 · getcheckout · Rejected Klarna for the UA market.
+
+## Milestones (importance ≥ 4)
+- 2026-08-20 · aibrain · Chose MCP SDK v2 over v1.
 
 ## Open todos
-- [getcheckout] Decide Adyen vs Shopify Payments on the OÜ entity.
+- [aibrain] Rotate the auth token before the first push.
 
 ## Preferences
 - Answer in the language the user writes in; keep replies concise.
@@ -235,149 +273,241 @@ Memory is stored in English. …
 Call memory_recall for details on any item.
 ```
 
-Останній рядок навмисний — він підштовхує наступний виклик. Один рядок на episode: `occurred_at · project · did (перше речення)` + `Deferred: …` якщо є. Ліміт — `SUMMARY_MAX_EPISODES`.
+`days` bounds the **Recent block only** — older work stays visible under "Earlier", grouped by month, so nothing silently ages out of the overview. The closing line is deliberate: it prompts the follow-up `memory_recall`.
 
-### 6.4 Resources і prompt
+### 6.4 Resources and prompt
 
-| URI | Опис |
+| URI | Description |
 |---|---|
-| `memory://summary` | Cross-project overview. Те саме, що `memory_summary`. **Статичний** (не template) — щоб клієнти могли автоприкріплювати. |
-| `memory://projects` | Список проєктів. |
-| `memory://projects/{project}/summary` | Хронологія одного проєкту. |
-| `memory://preferences` | Як користувач любить працювати. |
+| `memory://summary` | Cross-project overview. **Static**, so clients that auto-attach resources can surface it. |
+| `memory://projects` | Project list. |
+| `memory://projects/{project}/summary` | One project's chronology. |
+| `memory://notes/{id}` | Full markdown of a session or decision note — how web and mobile read details without the repo. |
+| `memory://preferences` | How the user prefers to work. |
 
-Prompt `start_session` (Claude Code рендерить його як slash-команду) = вивід `memory_summary` + правила з §6.2 дослівно.
+The `start_session` prompt (rendered as a slash command in Claude Code) returns the summary plus the §6.2 rules verbatim.
 
-### 6.5 Правила формулювань
+### 6.5 Wording rules
 
-Треба:
-- Починати з тригера: «ALWAYS call…», «REQUIRED before…», «Call IMMEDIATELY when…».
-- Знімати причину пропустити виклик: «even if you believe you already know the answer».
-- Казати, що буде без виклику: «Without this you do not know…».
-- Пояснювати, що робити з опційними аргументами: «Omit if unsure».
-- ≤ 400 символів на опис; перше речення несе рішення.
+Do: lead with the trigger ("ALWAYS call…", "REQUIRED before…", "Call IMMEDIATELY when…"); pre-empt the reason to skip ("even if you believe you already know the answer"); state what happens without the call; say "Omit if unsure" for optional arguments; stay under 400 characters.
 
-Не треба:
-- «Allows you to», «can be used to», «helps with» — пасивно, ігнорується.
-- Описувати реалізацію (OpenSearch, ембединги) — розмиває тригер.
-- Дублювати правило більш ніж у двох місцях.
+Don't: "allows you to", "can be used to", "helps with" — passive and ignored. Don't describe implementation. Don't repeat a rule in more than two places.
 
 ---
 
-## 7. Пошук, rerank, дедуп
+## 7. Search, ranking, dedupe
 
-**Hybrid query** — BM25 + kNN в одному запиті через search pipeline `hybrid-rrf` (min-max нормалізація, ваги 0.4 / 0.6). Фільтр kNN ставиться **всередину** `knn`-клаузи, а не в обгортковий `bool`: інакше це post-filter, який тихо повертає менше за `k`. Fallback, якщо `hybrid` недоступний, — два запити + RRF у Node (визначається один раз на процес).
+**Hybrid query** — BM25 and k-NN in one request through the `hybrid-rrf` search pipeline (min-max normalization, weights 0.4 / 0.6). The k-NN filter goes **inside** the `knn` clause; wrapping it in a `bool` filter would post-filter and silently return fewer than `k` hits. If the `hybrid` clause is unavailable, the server falls back once per process to two queries fused with RRF in Node.
 
-**Rerank у Node** після пошуку, за `occurred_at`:
+**Rerank in Node**, by `occurred_at`:
 
 ```
-episode:            score * exp(-ageDays / 90)
-decision | fact:    score * exp(-ageDays / 180) * (1 + (importance - 3) * 0.1)
-todo:               score * 1.2   (якщо status=active)
-preference:         score         (без decay)
+episode:            score × max(0.5, exp(-ageDays / 365))
+decision | fact:    score × (1 + (importance - 3) × 0.1)      — no decay
+todo:               score × 1.2  when status is active
+preference:         score                                      — never decays
 ```
 
-**Дедуп** — тільки для `decision | preference | todo | fact`. `content_hash` exact → update метаданих; інакше kNN top-5 у тому ж `project` + `type`, cosine ≥ `DEDUPE_THRESHOLD` → supersede старого. Cosine рахується в Node зі збереженого вектора, а не з `_score`: шкала `_score` залежить від рушія k-NN.
+The episode floor matters: `exp(-age/365)` crosses 0.5 at about 253 days, so everything older ranks the same on recency rather than fading to irrelevance.
 
-`episode` **не дедуплікується ніколи** — кожна сесія це окремий запис журналу.
+**Dedupe** applies to `decision | preference | todo | fact` only. Exact `content_hash` match updates metadata in place; otherwise a k-NN top-5 within the same project and type, with cosine ≥ `DEDUPE_THRESHOLD`, supersedes the older record. Cosine is recomputed in Node from the stored vector rather than read off `_score`, whose scale depends on the k-NN engine.
 
-Поріг 0.90 — стартовий для bge. Перевірити на 20–30 реальних фактах і підкрутити.
+**Episodes dedupe on `source.session_id` instead.** The `Stop` hook fires more than once per session, and one session is one journal entry, so a later write updates the first rather than adding to it.
 
 ---
 
-## 8. REST API
+## 8. Notes in the repo
 
-Bearer на всіх, крім `/health`.
+Every session leaves files behind, written by the hook rather than the model — so they appear whether or not Claude thought to create them.
 
-| Метод | Шлях | Призначення |
+| Path | Written when |
+|---|---|
+| `docs/memory/sessions/<date>-<short>.md` | every session, overwritten by repeat `Stop` hooks |
+| `docs/memory/decisions/<date>-<slug>.md` | a decision with `importance ≥ 4` was extracted |
+| `docs/memory/architecture.md` | the extraction reported an `architecture_delta` |
+
+The memory record carries `refs` (the paths) and `note` (the full markdown), so claude.ai and mobile can read the detail through `memory://notes/{id}` without the repo.
+
+**ADRs are not blindly overwritten.** The frontmatter carries `generated: true`. If the file is still untouched, a repeat `Stop` regenerates it. If you edited it — removed `generated`, or changed `status` — the hook leaves your text alone and appends a `## Revision <date>` section instead, so the divergence is visible rather than resolved silently in either direction.
+
+**`architecture.md` is patched, never rewritten.** Managed lines live inside `<!-- memory:begin Section -->` / `<!-- memory:end Section -->` markers and each carries an explicit key:
+
+```markdown
+## Modules
+<!-- memory:begin Modules -->
+- src/core/remember.ts — dedupe and supersede, shared by MCP and REST <!-- k:src/core/remember.ts -->
+<!-- memory:end Modules -->
+```
+
+Matching is on the `k:` marker, never on parsing the prose. Free text outside the blocks is yours and is never touched. Concurrent sessions are serialized by a lock implemented in `render.mjs` — `flock` does not exist on macOS, so the lock uses `O_EXCL` with a 60-second stale escape, portable across devices.
+
+**Commits are guarded.** The hook commits only `docs/memory`, and skips entirely when the repo is mid-rebase, mid-merge, mid-cherry-pick, or on a detached HEAD. It still writes the files and records the repo in `~/.claude/memory-pending-commits.log`; the next `SessionStart` there commits them once the repo is calm.
+
+---
+
+## 9. Context at the moment of action
+
+**Pre-tool recall.** Before Claude edits a file, a `PreToolUse` hook injects that file's history:
+
+```
+[memory] Earlier work on src/core/remember.ts:
+- 2026-08-21 · Added session-scoped dedupe for episodes. — because: The Stop hook fired several times per session. → docs/memory/sessions/2026-08-21-aabbccdd.md
+```
+
+Backed by `GET /api/file-context`, which ranks in three tiers — the exact file (from `episode.files` or `refs`), a decision that names it, then other work in the same directory. One lookup per file per session, at most four lines.
+
+`PreToolUse` **ignores plain stdout**, unlike `SessionStart` — context only reaches the model through `hookSpecificOutput.additionalContext`, so the hook emits JSON.
+
+A second hook does the same for `Bash` commands matching `docker compose|traefik|deploy|migrat|reindex|opensearch|certbot|systemctl`, catching "last time this broke because…". Deliberately narrow: firing on every `ls` would be pure noise.
+
+**Git as a second source.** A `post-commit` hook posts each commit to `/api/ingest/commit`. A commit made during a session attaches to that session's episode — the episode says why, the commits say what exactly. Outside a two-hour window it becomes a light episode of its own, which is how work done without Claude Code still reaches memory. Deduped on sha, so amends and rebases do not double-count.
+
+**Related links.** Every write finds up to five neighbours across all types in the project at cosine ≥ `RELATED_THRESHOLD` (looser than dedupe: "about the same thing", not "the same thing") and links them symmetrically. Recall attaches `see_also` to the top three hits.
+
+---
+
+## 10. OAuth
+
+A static bearer token only works where you can configure it locally — Claude Code and `mcp-remote`. **claude.ai web and mobile reach the server from Anthropic's cloud** (egress `160.79.104.0/21`) and cannot carry a local header, so the server runs its own OAuth 2.1.
+
+Set `PUBLIC_URL` to enable it; without it the server stays static-bearer only and logs a warning at boot.
+
+- **Dynamic client registration** (RFC 7591), so nothing needs entering in the connector dialog.
+- **PKCE S256 required.** Authorization codes are single-use with a 60-second TTL.
+- **Refresh tokens rotate** on every use and burn on replay, as required for public clients. Errors use RFC 6749 codes — Claude keys its refresh logic on `invalid_grant`.
+- **The consent screen** asks for `OAUTH_PASSWORD` (defaults to `MCP_AUTH_TOKEN`), locked out for 15 minutes after five failures.
+- **Both credentials work in parallel.** The middleware accepts the static token (hooks, REST) and OAuth access tokens (connectors). Dropping the static one would break every installed hook.
+- **`redirect_uri` matches exactly**, except loopback: Claude Code binds an ephemeral port under RFC 8252, so the port is ignored for `localhost` and `127.0.0.1` and nothing else. That check is what closes the open-redirect hole, and it is the most heavily tested function in the suite.
+- **401 responses carry `WWW-Authenticate: Bearer resource_metadata="…"`** — without it an MCP client never discovers that OAuth exists.
+
+---
+
+## 11. REST API
+
+Bearer token or OAuth access token on everything except `/health` and the OAuth endpoints.
+
+| Method | Path | Purpose |
 |---|---|---|
 | `POST\|GET\|DELETE` | `/mcp` | Streamable HTTP MCP transport |
-| `POST` | `/api/ingest` | `{ episode?, facts?, project?, source?, occurred_at? }` → `{ episode_id?, project, facts: {created,updated,merged}, skipped }` |
-| `GET` | `/api/summary?project=&days=` | те саме, що `memory_summary`, як `text/markdown` — для SessionStart-хука |
-| `GET` | `/api/projects` | список з `last_activity` |
-| `PUT` | `/api/projects/:slug` | `{ name?, aliases?, repo_names? }` — навчити сервер, який git remote це який проєкт |
-| `GET` | `/health` | без auth; OpenSearch + готовність embedder |
+| `POST` | `/api/ingest` | `{episode?, facts?, project?, refs?, note?, source?}` from the `Stop` hook |
+| `POST` | `/api/ingest/commit` | git `post-commit`; attaches to an episode or creates one |
+| `GET` | `/api/summary?project=&days=` | same text as `memory_summary`, as markdown, for `SessionStart` |
+| `GET` | `/api/file-context?path=&k=` | file history for the pre-tool hook |
+| `GET` | `/api/recall?q=&type=&k=` | search for the Bash hook |
+| `GET` | `/api/projects` | project list with `last_activity` |
+| `PUT` | `/api/projects/:slug` | `{name?, aliases?, repo_names?}` — teach it your git remotes |
+| `GET` | `/api/stats?days=` | usage metrics and warnings |
+| `GET` | `/health` | no auth; OpenSearch plus embedder readiness |
+| — | `/.well-known/oauth-*`, `/oauth/*` | no auth; discovery, registration, authorize, token, revoke |
 
-`POST /api/ingest` проганяє кожен факт через той самий `core/remember.ts`, що й MCP-тул. Тіло приймається **тільки англійською** — сервер не перекладає.
+Bodies must already be English — the server never translates.
 
 ---
 
-## 9. Клієнт Claude Code
+## 12. Claude Code client
 
-Повна інструкція — [claude-code/README.md](claude-code/README.md).
+Full instructions in [claude-code/README.md](claude-code/README.md).
 
-| Файл | Подія | Ефект |
+| File | Event | Effect |
 |---|---|---|
-| `hooks/memory-context.sh` | `SessionStart` | Друкує хронологію в контекст. Детерміновано, без участі моделі. |
-| `hooks/memory-extract.sh` | `Stop` | Журналює сесію: один episode + до 5 фактів через `claude -p --model haiku`. |
-| `commands/memory-log.md` | `/memory-log <text>` | Ручний запис, коли хук не спрацював. |
-| `prompts/extract.txt` | — | Промпт екстракції. Редагувати тут, щоб змінити, що запам'ятовується. |
+| `hooks/memory-context.sh` | `SessionStart` | Prints the chronology into context, plus paths to the architecture map and recent ADRs. Commits any notes a previous session could not. |
+| `hooks/memory-pretool.sh` | `PreToolUse` (Edit/Write/MultiEdit) | Injects that file's history before the edit. |
+| `hooks/memory-pretool-bash.sh` | `PreToolUse` (Bash) | Same for deploy-shaped commands. |
+| `hooks/memory-extract.sh` | `Stop` | Journals the session, writes note files, patches the architecture map, commits. |
+| `git/post-commit` | git | Sends commits to memory. |
+| `commands/memory-log.md` | `/memory-log <text>` | Manual write when a session was interrupted. |
+| `prompts/extract.txt` | — | The extraction prompt. Edit this to change what gets remembered. |
+| `hooks/render.mjs` | — | Renders notes and patches `architecture.md`. |
 
-Три речі, які легко зламати й важко помітити:
+Three things that are easy to break and hard to notice:
 
-- **Рекурсія.** `claude -p` усередині Stop-хука запускає сесію, яка знову викликає той самий Stop-хук. Дочірній процес іде з `MEMORY_HOOK_RUNNING=1` і виходить одразу.
-- **Хук ніколи не фейлить сесію.** Усі шляхи закінчуються `exit 0`; `curl --max-time`, `timeout 120` на `claude -p`.
-- **Екстракція йде у фоні** — хук повертається одразу, модель викликається detached, лог у `~/.claude/memory-extract.log`.
+- **Recursion.** `claude -p` inside the `Stop` hook starts a session that fires the same hook. The child runs with `MEMORY_HOOK_RUNNING=1` and exits immediately.
+- **Hooks never fail a session.** Every path ends in `exit 0`; `curl` has `--max-time`, `claude -p` has `timeout 120`.
+- **Extraction runs detached** — the hook returns immediately and logs to `~/.claude/memory-extract.log`.
 
-Сесії з менш ніж 400 символів прози не журналяться.
+Sessions with under 400 characters of prose are not journaled.
+
+Requires `jq`, `curl`, and `node` on `PATH`.
 
 ---
 
-## 10. Конфігурація
+## 13. Configuration
 
-| Змінна | Default | Нащо |
+| Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `3000` | |
 | `LOG_LEVEL` | `info` | `trace`…`fatal`, `silent` |
-| `MCP_TRANSPORT` | `http` | `stdio` — лише для MCP Inspector |
-| `MCP_AUTH_TOKEN` | — | обов'язковий при `http`. `openssl rand -hex 32` |
+| `MCP_TRANSPORT` | `http` | `stdio` for MCP Inspector only |
+| `MCP_AUTH_TOKEN` | — | required for `http`; `openssl rand -hex 32` |
 | `OPENSEARCH_URL` | `http://localhost:9200` | |
-| `INDEX_PREFIX` | `` | щоб кілька деплоїв ділили один кластер |
+| `INDEX_PREFIX` | empty | lets several deployments share one cluster |
 | `EMBED_MODEL` | `BAAI/bge-base-en-v1.5` | |
-| `EMBED_DIM` | `768` | має збігатися з моделлю — перевіряється на старті |
-| `EMBED_DTYPE` | `fp32` | `q8` вчетверо менше пам'яті, гірший recall |
-| `MODEL_CACHE_DIR` | `/models` | volume, щоб не тягнути модель щоразу |
-| `DEDUPE_THRESHOLD` | `0.90` | cosine, вище якого новий факт витісняє старий |
-| `SUMMARY_DAYS` | `30` | глибина хронології |
-| `SUMMARY_MAX_EPISODES` | `15` | рядків у хронології |
+| `EMBED_DIM` | `768` | must match the model; checked at boot |
+| `EMBED_DTYPE` | `fp32` | `q8` uses a quarter of the memory, at some recall cost |
+| `MODEL_CACHE_DIR` | `/models` | volume, so the model downloads once |
+| `DEDUPE_THRESHOLD` | `0.90` | cosine above which a new fact supersedes an old one |
+| `RELATED_THRESHOLD` | `0.75` | cosine for `related` links |
+| `RELATED_MAX` | `5` | neighbours linked per write |
+| `SUMMARY_DAYS` | `30` | depth of the Recent block |
+| `SUMMARY_MAX_EPISODES` | `15` | lines in the Recent block |
 | `RECALL_DEFAULT_K` | `8` | |
-| `DEFAULT_PROJECT` | `general` | коли проєкт не визначено |
+| `DEFAULT_PROJECT` | `general` | when the project cannot be determined |
+| `METRICS_ENABLED` | `true` | the `events` index; no content is stored |
+| `PUBLIC_URL` | unset | external origin; **setting it enables OAuth** |
+| `OAUTH_PASSWORD` | `MCP_AUTH_TOKEN` | consent screen password |
+| `OAUTH_ACCESS_TTL` | `3600` | seconds |
+| `OAUTH_REFRESH_TTL` | `2592000` | seconds (30 days) |
 
-Жорсткі ліміти в коді (`config.ts` → `LIMITS`): `content` ≤ 2000 символів, `recall.k` ≤ 30, тіло `/api/ingest` ≤ 2 MB, ≤ 500 фактів за раз, episode коротший за 40 символів пропускається.
-
----
-
-## 11. Експлуатація
-
-**Зміна моделі ембедингів** = `npm run reindex`. Скрипт перераховує всі вектори в новий індекс `memories-v<timestamp>` і друкує команду для alias-свопу; нічого не видаляє. Старі вектори несумісні з новою моделлю — без reindex пошук просто мовчки деградує.
-
-**Бекап** — `scripts/backup.sh --register` один раз, далі `scripts/backup.sh` щоночі по cron. Snapshot у volume, тримає останні 14. Раз на тиждень — копія на Hetzner Object Storage.
-
-**Логи** — pino JSON. Контент фактів редагується на рівні `info`: в логах тільки id і лічильники.
-
-**Тести** — `npm test` (vitest). Покривають дедуп-нормалізацію, rerank-формули, формат хронології та описи тулів (снапшот, щоб будь-яка зміна формулювання була свідомим diff'ом).
-
-**Ротація токена** — замінити `MCP_AUTH_TOKEN` в `.env`, `~/.claude/memory.env` на кожному пристрої та в конекторах claude.ai.
+Hard limits in code (`config.ts` → `LIMITS`): `content` ≤ 2000 characters, `note` ≤ 20 000, `refs` ≤ 20, `recall.k` ≤ 30, `/api/ingest` body ≤ 2 MB and ≤ 500 facts, episodes under 40 characters skipped.
 
 ---
 
-## 12. Зафіксовані рішення
+## 14. Operations
 
-- **Платні API — жодних.** Якщо якості bge-base не вистачить: спершу `bge-large-en-v1.5` (1024 dim, потребує reindex), і лише потім обговорювати Voyage.
-- **English-only storage.** Переклад — обов'язок хука (`extract.txt`) і описів тулів.
-- **Episode не дедуплікується.** Кожна сесія — окремий запис.
-- **Summary — шаблон, без LLM.** `/memory-rebuild` з v2 прибрано.
-- **Один користувач.** Поле `owner` у mapping не додається. Якщо з'явиться — міграція через `reindex.ts`.
-- **stdio — лише dev.** У проді тільки Streamable HTTP.
+**Changing the embedding model** means `npm run reindex`. It recomputes every vector into `memories-v<timestamp>` and prints the alias swap; it deletes nothing. Old vectors are incompatible with a new model — without a reindex, search degrades silently rather than failing.
+
+**`npx tsx scripts/migrate-episodes.ts --dry-run`** collapses episode duplicates written before session-scoped dedupe existed, keeping the newest per `session_id` and splitting `deferred` into real todos. Episodes with no `session_id` are left alone.
+
+**Backups**: `scripts/backup.sh --register` once, then `scripts/backup.sh` nightly from cron. Snapshots into a volume, keeps the last 14.
+
+**Logs**: pino JSON. Memory content is redacted at `info` — only ids and counters.
+
+**Tests**: `npm test`. Covers dedupe normalization, rerank curves, summary formatting, the OAuth PKCE and redirect rules, `related` selection, the OpenSearch HEAD-404 contract, and a snapshot of every tool description so a reworded description is a deliberate diff.
+
+**Watching whether it works**: `GET /api/stats?days=7`. The number that matters most is `zero_result_pct` — above 30% means recall is failing, and the cause is usually query wording or missing data rather than ranking.
+
+**Token rotation**: replace `MCP_AUTH_TOKEN` in the server `.env`, in `~/.claude/memory.env` on every device, in `~/.claude.json`, and in any connector. OAuth exists partly to make this rarer.
 
 ---
 
-## 13. Відхилення від первинних специфікацій
+## 15. Fixed decisions
 
-Три місця, де реалізація свідомо розходиться з текстом специфікацій:
+- **No paid APIs.** If `bge-base` proves insufficient, the next step is `bge-large-en-v1.5` (1024 dim, needs a reindex), not a hosted embedding service.
+- **English-only storage.** Translation is the responsibility of the hook prompt and the tool descriptions.
+- **One episode per session**, keyed on `session_id`. Repeat `Stop` hooks update rather than append.
+- **Deferred work becomes a real todo**, so it can appear under Open todos and be closed. It closes automatically when a later `Stop` in the same session no longer defers it.
+- **Summaries are templates.** No LLM rebuild.
+- **Single user.** No `owner` field. Adding one would need a reindex.
+- **stdio is development only.** Production is Streamable HTTP.
+- **The model never writes note files.** It records decisions in memory; the hook creates the files deterministically afterwards. That is what stops the two racing.
 
-1. **MCP SDK v2** (`@modelcontextprotocol/server`), а не v1 `@modelcontextprotocol/sdk`, як писали специфікації. У v2 є `WebStandardStreamableHTTPServerTransport`, який приймає `c.req.raw` напряму — Hono не потребує адаптера. Реєстрація тулів — `registerTool(name, { description, inputSchema }, cb)` замість `server.tool(name, desc, shape, cb)`.
-2. **`memory_detect_project` не реалізовано.** Він є в self-describing-spec §4.4, але v3 не включив його ні в дерево файлів, ні в §5. Визначення проєкту робить `detect_project()` у `lib.sh` проти `GET /api/projects` — без моделі, як і решта хука.
-3. **Опис `memory_remember` скорочено.** Дослівний текст spec §4.3 разом із доданим у v3 реченням про англійську дає 421 символ проти ліміту 400 з spec §8. Імперативну частину («Call IMMEDIATELY…», «Do not ask permission…») збережено дослівно, стиснуто речення про переклад.
+---
 
-Архів попередніх версій специфікації — [docs/archive/](docs/archive/).
+## 16. Deviations from the design documents
+
+Three places where the implementation deliberately differs from the specifications in [docs/archive/](docs/archive/):
+
+1. **MCP SDK v2** (`@modelcontextprotocol/server`), not v1 `@modelcontextprotocol/sdk`. v2 provides `WebStandardStreamableHTTPServerTransport`, which takes `c.req.raw` directly, so Hono needs no adapter. Tools register through `registerTool(name, {description, inputSchema}, cb)`.
+2. **`memory_detect_project` was not implemented.** It appears in the self-describing spec §4.4, but the v3 document dropped it from both the file tree and §5. Project detection happens in `lib.sh` against `GET /api/projects` — no model involved, like the rest of the hook.
+3. **`memory_remember`'s description is shortened.** The verbatim spec text plus the English-translation sentence came to 421 characters against the 400-character cap. The imperative half is kept word for word; the guidance about `refs` moved onto the parameter description instead.
+
+---
+
+## 17. Not built yet
+
+From the design documents, in the order they are worth doing:
+
+- **Reranker** (`bge-reranker-base`) and **chunked note search**. Both gated on `free -m` showing at least 800 MB spare after OpenSearch and the embedder are warm — and on `/api/stats` showing that ranking, rather than missing data, is the problem.
+- **Weekly digest** delivered to Telegram, plus a nightly **self-healing** pass (episodes without refs, todos older than 60 days, contradictory decisions, `general` overflow).
+- **claude.ai chat import** from an account export.
+- **Calendar and Gmail** ingestion as a separate worker.

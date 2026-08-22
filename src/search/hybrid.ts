@@ -19,7 +19,14 @@ export function buildFilters(f: MemoryFilters): unknown[] {
   if (f.project?.length) clauses.push({ terms: { project: f.project } });
   if (f.type?.length) clauses.push({ terms: { type: f.type } });
   if (f.tags?.length) clauses.push({ terms: { tags: f.tags } });
-  if (f.since) clauses.push({ range: { occurred_at: { gte: f.since } } });
+  if (f.since || f.until) {
+    clauses.push({
+      range: {
+        occurred_at: { ...(f.since ? { gte: f.since } : {}), ...(f.until ? { lte: f.until } : {}) },
+      },
+    });
+  }
+  if (f.minImportance !== undefined) clauses.push({ range: { importance: { gte: f.minImportance } } });
   return clauses;
 }
 

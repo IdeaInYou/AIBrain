@@ -1,40 +1,67 @@
 import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
-import { config } from '../config.js';
+import { OAUTH, OAUTH_ENABLED, config } from '../config.js';
 import { logger } from '../logger.js';
+import { verifyAccessToken } from '../oauth/service.js';
+import { mountFileContext } from './routes/file-context.js';
 import { mountHealth } from './routes/health.js';
 import { mountIngest } from './routes/ingest.js';
 import { mountMcp } from './routes/mcp.js';
+import { mountOAuth } from './routes/oauth.js';
 import { mountProjects } from './routes/projects.js';
+import { mountStats } from './routes/stats.js';
 import { mountSummary } from './routes/summary.js';
 
 /** Constant-time compare so a wrong token cannot be discovered byte by byte. */
-function tokenMatches(presented: string): boolean {
+function isStaticToken(presented: string): boolean {
   const a = Buffer.from(presented, 'utf8');
   const b = Buffer.from(config.MCP_AUTH_TOKEN, 'utf8');
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * Two credentials are accepted, deliberately:
+ *   - the static MCP_AUTH_TOKEN, used by the shell hooks and the REST API
+ *   - an OAuth access token, used by claude.ai web/mobile/Desktop connectors
+ * Dropping the static one would break every installed hook.
+ */
+async function authenticate(presented: string): Promise<'static' | 'oauth' | null> {
+  if (config.MCP_AUTH_TOKEN && isStaticToken(presented)) return 'static';
+  if (OAUTH_ENABLED && (await verifyAccessToken(presented))) return 'oauth';
+  return null;
+}
+
 export function createApp(): Hono {
   const app = new Hono();
 
-  // /health stays open so Docker and Traefik can probe without the secret.
+  // Public routes, mounted before the auth middleware.
   mountHealth(app);
+  if (OAUTH_ENABLED) mountOAuth(app);
 
   app.use('*', async (c, next) => {
     const header = c.req.header('authorization') ?? '';
     const presented = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-    if (!presented || !tokenMatches(presented)) {
+    const kind = presented ? await authenticate(presented) : null;
+
+    if (!kind) {
       logger.warn({ path: c.req.path, method: c.req.method }, 'unauthorized');
-      return c.json({ error: 'unauthorized' }, 401);
+      // The WWW-Authenticate pointer is what makes an MCP client discover OAuth
+      // instead of simply giving up. Claude does not honour it on a 200.
+      const headers: Record<string, string> = OAUTH_ENABLED
+        ? { 'WWW-Authenticate': `Bearer resource_metadata="${OAUTH.protectedResourceMetadata}"` }
+        : {};
+      return c.json({ error: 'unauthorized' }, 401, headers);
     }
+
     await next();
   });
 
   mountMcp(app);
   mountIngest(app);
+  mountFileContext(app);
   mountSummary(app);
   mountProjects(app);
+  mountStats(app);
 
   app.onError((err, c) => {
     logger.error({ err: err.message, path: c.req.path }, 'request failed');

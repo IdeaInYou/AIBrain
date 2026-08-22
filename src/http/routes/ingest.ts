@@ -1,6 +1,7 @@
 import type { Hono } from 'hono';
 import * as z from 'zod';
 import { LIMITS } from '../../config.js';
+import { ingestCommit } from '../../core/commits.js';
 import { ingest } from '../../core/ingest.js';
 import { MEMORY_TYPES, SOURCE_KINDS } from '../../types.js';
 
@@ -25,6 +26,9 @@ const IngestSchema = z.object({
   facts: z.array(FactSchema).max(LIMITS.ingestFacts).default([]),
   project: z.string().optional(),
   occurred_at: z.string().optional(),
+  /** Repo-relative note paths written by the Stop hook, attached to the episode. */
+  refs: z.array(z.string()).max(LIMITS.maxRefs).default([]),
+  note: z.string().max(LIMITS.noteChars).optional(),
   source: z
     .object({
       kind: z.enum(SOURCE_KINDS).default('hook'),
@@ -35,8 +39,41 @@ const IngestSchema = z.object({
     .optional(),
 });
 
+const CommitSchema = z.object({
+  project: z.string().optional(),
+  commit: z.object({
+    sha: z.string().min(4).max(64),
+    message: z.string().min(1).max(2000),
+    stat: z.string().max(200).optional(),
+    files: z.array(z.string()).max(30).default([]),
+  }),
+  source: z
+    .object({
+      client: z.string().nullish().default('git'),
+      device: z.string().nullish().default(null),
+    })
+    .optional(),
+});
+
 /** The Stop hook's write path. Body must already be English — the server never translates. */
 export function mountIngest(app: Hono): void {
+  // The git post-commit hook. Separate from /api/ingest because a commit is not
+  // an extraction: no model ran, and it either joins an episode or becomes one.
+  app.post('/api/ingest/commit', async c => {
+    const parsed = CommitSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: 'invalid body', issues: parsed.error.issues.slice(0, 10) }, 400);
+    }
+    const b = parsed.data;
+    return c.json(
+      await ingestCommit({
+        ...(b.project ? { project: b.project } : {}),
+        commit: b.commit,
+        ...(b.source ? { source: { client: b.source.client ?? 'git', device: b.source.device ?? null } } : {}),
+      }),
+    );
+  });
+
   app.post('/api/ingest', async c => {
     const declared = Number(c.req.header('content-length') ?? 0);
     if (declared > LIMITS.ingestBytes) {
@@ -59,6 +96,8 @@ export function mountIngest(app: Hono): void {
       facts: body.facts,
       ...(body.project ? { project: body.project } : {}),
       ...(body.occurred_at ? { occurred_at: body.occurred_at } : {}),
+      ...(body.refs.length ? { refs: body.refs } : {}),
+      ...(body.note ? { note: body.note } : {}),
       ...(body.source
         ? {
             source: {

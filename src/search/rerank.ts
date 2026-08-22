@@ -23,14 +23,17 @@ export function finalScore(hit: Rerankable, now: number): number {
   const age = ageInDays(hit.occurred_at, now);
   switch (hit.type) {
     case 'episode':
-      return hit.score * Math.exp(-age / 90);
+      // Year-scale decay with a floor: recent work still wins, but an old
+      // episode never decays to irrelevance — that is how history got lost.
+      return hit.score * Math.max(0.5, Math.exp(-age / 365));
     case 'todo':
       return hit.status === 'active' ? hit.score * 1.2 : hit.score;
     case 'preference':
       return hit.score;
     case 'decision':
     case 'fact':
-      return hit.score * Math.exp(-age / 180) * (1 + (hit.importance - 3) * 0.1);
+      // No decay at all: a decision stands until something supersedes it.
+      return hit.score * (1 + (hit.importance - 3) * 0.1);
   }
 }
 

@@ -1,5 +1,6 @@
 import { LIMITS, config } from '../config.js';
 import { logger } from '../logger.js';
+import { recordEvent } from './events.js';
 import { remember } from './remember.js';
 import type { EpisodeBody, FactTally, MemorySource, MemoryType } from '../types.js';
 
@@ -17,6 +18,9 @@ export interface IngestInput {
   project?: string;
   source?: MemorySource;
   occurred_at?: string;
+  /** Attached to the episode only — facts carry their own refs if they have any. */
+  refs?: string[];
+  note?: string;
 }
 
 export interface IngestResult {
@@ -31,6 +35,7 @@ export interface IngestResult {
  * Text arrives already in English — the server does not translate.
  */
 export async function ingest(input: IngestInput): Promise<IngestResult> {
+  const started = Date.now();
   const project = input.project?.trim() || config.DEFAULT_PROJECT;
   const facts = (input.facts ?? []).slice(0, LIMITS.ingestFacts);
   const result: IngestResult = { project, facts: { created: 0, updated: 0, merged: 0 }, skipped: 0 };
@@ -47,6 +52,8 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       episode: input.episode,
       ...(input.source ? { source: input.source } : {}),
       ...(input.occurred_at ? { occurred_at: input.occurred_at } : {}),
+      ...(input.refs?.length ? { refs: input.refs } : {}),
+      ...(input.note ? { note: input.note } : {}),
     });
     result.episode_id = written.id;
   } else if (input.episode) {
@@ -81,5 +88,13 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   }
 
   logger.info({ ...result.facts, skipped: result.skipped, project }, 'ingest complete');
+  recordEvent({
+    kind: 'ingest',
+    project,
+    source_kind: input.source?.kind ?? 'hook',
+    client: input.source?.client ?? null,
+    hits: result.facts.created + result.facts.updated + result.facts.merged,
+    latency_ms: Date.now() - started,
+  });
   return result;
 }

@@ -4,10 +4,10 @@ Write EVERYTHING in English, regardless of the transcript language. Keep identif
 Return ONLY a JSON object, no prose, no markdown fences:
 {
   "episode": {
-    "did": "1–2 sentences: what was actually done or investigated",
-    "why": "1 sentence: the reason or trigger",
-    "outcome": "1 sentence: result — fixed / partially / blocked / decided",
-    "deferred": "1 sentence or empty string: what was explicitly postponed",
+    "did": "what was actually done or investigated",
+    "why": "the reason or trigger",
+    "outcome": "the result",
+    "deferred": "what was explicitly postponed, or an empty string",
     "files": ["paths touched, max 10"]
   },
   "facts": [
@@ -16,4 +16,30 @@ Return ONLY a JSON object, no prose, no markdown fences:
       "tags": ["..."], "importance": 1-5 }
   ]
 }
+
+LENGTH LIMITS — these are hard:
+- "did": at most 2 sentences.
+- "why", "outcome", "deferred": exactly 1 sentence each, or "" for deferred if nothing was postponed.
+- Never repeat in "why" or "outcome" anything already stated in "did". They must add new information,
+  not restate it. "outcome" is the result only — fixed / partially fixed / blocked / decided — not a
+  second description of the work.
+- No bullet lists, no line breaks, no markdown inside any field.
+
 "facts" holds only durable items: decisions made, user preferences stated, open todos, stable facts about systems. Max 5. Use [] if none. Skip debugging noise.
+Set importance 4 or 5 only for architectural decisions, production incidents, or things that change how the project works.
+
+Also return "architecture_delta": a list of changes to the project's architecture map that this session
+caused. Only structural facts: new/removed modules, changed responsibilities, new integrations, changed
+data flow, new env vars or services. Empty list if nothing structural changed — that is the common case,
+so do not invent entries.
+
+  "architecture_delta": [
+    { "section": "Modules|Data flow|Integrations|Infrastructure|Config",
+      "op": "add|remove|replace",
+      "key": "short stable identifier, e.g. 'src/core/remember.ts' or 'OpenSearch'",
+      "text": "one line, English, no leading dash" }
+  ]
+
+"key" must be the stable thing being described (a file path, a service name), not a description of the
+change — it is how the same entry is found and updated next time. Use "replace" when the key already
+exists in the map with different content.

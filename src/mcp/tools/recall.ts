@@ -9,7 +9,7 @@ export const RECALL_DESCRIPTION =
   'their projects, codebase, architecture, infrastructure, business, past decisions, or ' +
   'preferences — even if you believe you already know the answer. ' +
   'Query must be in English; translate the user\'s question if needed. ' +
-  'Searches across all projects by default; the project filter is optional.';
+  'Results may include refs (file paths) — read them when the user needs details beyond the summary.';
 
 export function registerRecall(server: McpServer): void {
   server.registerTool(
@@ -34,6 +34,10 @@ export function registerRecall(server: McpServer): void {
           .string()
           .optional()
           .describe("Optional. ISO date or relative like '30d'. Use for 'recent' questions."),
+        until: z
+          .string()
+          .optional()
+          .describe("Optional upper bound. ISO date or relative like '30d'. Pair with since to search one window."),
         k: z
           .number()
           .int()
@@ -54,6 +58,9 @@ export function registerRecall(server: McpServer): void {
         type: h.type,
         content: h.content,
         ...(h.episode ? { episode: h.episode } : {}),
+        ...(h.refs.length ? { refs: h.refs } : {}),
+        ...(h.has_note ? { note_resource: `memory://notes/${h.id}` } : {}),
+        ...(h.see_also?.length ? { see_also: h.see_also } : {}),
         occurred_at: h.occurred_at,
         score: Number(h.score.toFixed(4)),
       }));

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { episodeLine, firstSentence } from '../src/core/summary.js';
 import type { MemoryHit } from '../src/types.js';
 
-function episode(partial: Partial<MemoryHit> & { did: string; deferred?: string }): MemoryHit {
+function episode(partial: Partial<MemoryHit> & { did: string; deferred?: string; refs?: string[] }): MemoryHit {
   return {
     id: 'x',
     content: partial.did,
@@ -17,7 +17,10 @@ function episode(partial: Partial<MemoryHit> & { did: string; deferred?: string 
       outcome: '',
       deferred: partial.deferred ?? '',
       files: [],
+      commits: [],
     },
+    refs: partial.refs ?? [],
+    has_note: false,
     occurred_at: partial.occurred_at ?? '2026-08-20T14:03:11.000Z',
     created_at: '2026-08-20T14:03:11.000Z',
     score: 1,
@@ -44,13 +47,35 @@ describe('episodeLine', () => {
     expect(line).toBe('- 2026-08-20 · getcheckout · Fixed country-detection cookie precedence.');
   });
 
-  it('appends deferred work when present', () => {
+  // Deferred work is now split out into its own todo and shown under "Open
+  // todos", so repeating it on the timeline line would say it twice.
+  it('does not append deferred work — that lives as a todo now', () => {
     const line = episodeLine(
       episode({ did: 'Shipped the checkout rewrite.', deferred: 'Adyen multi-currency. Also i18n.' }),
     );
-    expect(line).toBe(
-      '- 2026-08-20 · getcheckout · Shipped the checkout rewrite. Deferred: Adyen multi-currency.',
+    expect(line).toBe('- 2026-08-20 · getcheckout · Shipped the checkout rewrite.');
+    expect(line).not.toContain('Deferred');
+  });
+
+  it('points at the session note when one exists', () => {
+    const line = episodeLine(
+      episode({ did: 'Shipped the checkout rewrite.', refs: ['docs/memory/sessions/2026-08-20-a1b2c3d4.md'] }),
     );
+    expect(line).toBe(
+      '- 2026-08-20 · getcheckout · Shipped the checkout rewrite. → docs/memory/sessions/2026-08-20-a1b2c3d4.md',
+    );
+  });
+
+  it('omits the arrow when there is no note', () => {
+    expect(episodeLine(episode({ did: 'Did a thing.' }))).not.toContain('→');
+  });
+
+  it('uses only the first ref — decision ADRs do not clutter the timeline', () => {
+    const line = episodeLine(
+      episode({ did: 'Did a thing.', refs: ['docs/memory/sessions/s.md', 'docs/memory/decisions/d.md'] }),
+    );
+    expect(line).toContain('→ docs/memory/sessions/s.md');
+    expect(line).not.toContain('decisions/d.md');
   });
 
   it('keeps one episode to one line', () => {

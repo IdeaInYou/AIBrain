@@ -8,6 +8,8 @@ export const REMEMBER_DESCRIPTION =
   "Store a durable fact in the user's long-term memory. Call IMMEDIATELY when the user " +
   'states a decision, a preference, a fact about their systems or company, or an open todo. ' +
   'Do not ask permission and do not wait to be told to remember. One call per fact. ' +
+  // The refs guidance lives on the `refs` parameter instead — the 400-char cap
+  // is tight, and the parameter description is where the model reads it anyway.
   'content must be in English — translate it, keeping identifiers and error messages verbatim.';
 
 export function registerRemember(server: McpServer): void {
@@ -51,6 +53,18 @@ export function registerRemember(server: McpServer): void {
           .string()
           .optional()
           .describe('Optional ISO date of when this happened. Defaults to now — set it only for past events.'),
+        refs: z
+          .array(z.string())
+          .max(LIMITS.maxRefs)
+          .optional()
+          .describe(
+            'If a note file exists in the repo for this item, pass its repo-relative path here.',
+          ),
+        note: z
+          .string()
+          .max(LIMITS.noteChars)
+          .optional()
+          .describe('For detailed context pass the markdown of the note here. In English.'),
       }),
     },
     async args => {

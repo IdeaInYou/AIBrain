@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# git post-commit — sends every commit to memory.
+#
+# A commit made during a Claude Code session attaches to that session's episode
+# (the episode says why, commits say what). A commit made without Claude Code
+# becomes a light episode of its own — that is how work done outside the tool
+# still reaches memory.
+#
+# Installed via claude-code/git/install-hook.sh. Always exits 0.
+set -uo pipefail
+. "$HOME/.claude/hooks/lib.sh" 2>/dev/null || exit 0
+
+mem_configured || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+
+msg="$(git log -1 --pretty=%B 2>/dev/null)"
+# Never journal the hook's own note commits — that would be an infinite mirror.
+case "$msg" in memory:*) exit 0 ;; esac
+
+# Amends and rebases replay commits; the server dedupes on sha, but skipping
+# here saves the round trip.
+sha="$(git rev-parse --short HEAD 2>/dev/null)" || exit 0
+[ -z "$sha" ] && exit 0
+
+# --root matters for the very first commit in a repo: without it diff-tree has
+# no parent to compare against and silently reports no files at all.
+files="$(git diff-tree --no-commit-id --name-only -r --root HEAD 2>/dev/null | head -30 | jq -R . | jq -sc .)"
+stat="$(git diff-tree --no-commit-id --shortstat -r --root HEAD 2>/dev/null | tr -d '\n' | sed 's/^ *//')"
+project="$(detect_project 2>/dev/null || true)"
+
+jq -n --arg m "$msg" --arg s "$stat" --argjson f "${files:-[]}" \
+      --arg p "${project:-general}" --arg sha "$sha" --arg d "$DEVICE" \
+  '{project: $p,
+    commit: {sha: $sha, message: $m, stat: $s, files: $f},
+    source: {client: "git", device: $d}}' \
+  | mem_post /api/ingest/commit >>"$HOME/.claude/memory-extract.log" 2>&1 &
+
+exit 0

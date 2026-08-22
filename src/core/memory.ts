@@ -6,6 +6,9 @@ import { osRequest, statusOf } from '../search/client.js';
 import { contentHash } from '../search/dedupe.js';
 import { listMemories, searchMemories, type RawHit } from '../search/hybrid.js';
 import { rerank } from '../search/rerank.js';
+import { findEpisodeBySession } from './remember.js';
+import { recordEvent } from './events.js';
+import { hydrateRelated, linkPair, type SeeAlso } from './related.js';
 import type {
   MemoryDoc,
   MemoryFilters,
@@ -29,6 +32,10 @@ export function parseSince(input?: string): string | undefined {
   return new Date(parsed).toISOString();
 }
 
+/** Context budget: see_also on the top 3 hits only, 3 neighbours each. */
+const SEE_ALSO_FOR = 3;
+const SEE_ALSO_MAX = 3;
+
 export function toHit(raw: RawHit): MemoryHit {
   const s = raw._source;
   return {
@@ -40,6 +47,8 @@ export function toHit(raw: RawHit): MemoryHit {
     importance: s.importance,
     status: s.status,
     episode: s.episode ?? null,
+    refs: s.refs ?? [],
+    has_note: Boolean(s.note),
     occurred_at: s.occurred_at,
     created_at: s.created_at,
     score: raw._score,
@@ -51,22 +60,57 @@ export interface RecallInput {
   project?: string | string[];
   type?: MemoryType[];
   since?: string;
+  until?: string;
   k?: number;
 }
 
-export async function recall(input: RecallInput): Promise<MemoryHit[]> {
+/** Recall result plus the neighbours of the strongest hits. */
+export interface RecalledHit extends MemoryHit {
+  see_also?: SeeAlso[];
+}
+
+export async function recall(input: RecallInput): Promise<RecalledHit[]> {
   const k = Math.min(Math.max(input.k ?? config.RECALL_DEFAULT_K, 1), LIMITS.recallK);
   const filters: MemoryFilters = {
     status: ['active'],
     ...(input.project ? { project: Array.isArray(input.project) ? input.project : [input.project] } : {}),
     ...(input.type?.length ? { type: input.type } : {}),
     ...(input.since ? { since: parseSince(input.since)! } : {}),
+    ...(input.until ? { until: parseSince(input.until)! } : {}),
   };
 
+  const started = Date.now();
   const vector = await embedOne(input.query, 'query');
   // Over-fetch so the type-aware rerank has room to reorder before truncating.
   const raw = await searchMemories({ query: input.query, vector, filters, k: k * 3 });
-  return rerank(raw.map(toHit)).slice(0, k);
+  const hits: RecalledHit[] = rerank(raw.map(toHit)).slice(0, k);
+
+  // Only the top few: see_also on every hit would swamp the context budget.
+  const byId = new Map(raw.map(h => [h._id, h._source.related ?? []]));
+  await Promise.all(
+    hits.slice(0, SEE_ALSO_FOR).map(async hit => {
+      const ids = (byId.get(hit.id) ?? []).filter(id => !hits.some(h => h.id === id));
+      const seeAlso = await hydrateRelated(ids.slice(0, SEE_ALSO_MAX));
+      if (seeAlso.length) hit.see_also = seeAlso;
+    }),
+  );
+
+  recordEvent({
+    kind: 'recall',
+    k,
+    hits: hits.length,
+    latency_ms: Date.now() - started,
+    query_len: input.query.length,
+    ...(hits[0] ? { top_score: Number(hits[0].score.toFixed(4)) } : {}),
+  });
+  return hits;
+}
+
+/** Backs memory://notes/{id} — gives clients without the repo the full note text. */
+export async function getNote(id: string): Promise<{ note: string; project: string; refs: string[] } | null> {
+  const doc = await getById(id);
+  if (!doc?.note) return null;
+  return { note: doc.note, project: doc.project, refs: doc.refs ?? [] };
 }
 
 export async function getById(id: string): Promise<MemoryDoc | null> {
@@ -77,6 +121,37 @@ export async function getById(id: string): Promise<MemoryDoc | null> {
     if (statusOf(err) === 404) return null;
     throw err;
   }
+}
+
+/** How far back to look for the session that closed a todo. Same window as commits. */
+const CLOSURE_WINDOW = 'now-2h';
+
+/**
+ * When a todo raised in one session is closed in another, link the two episodes
+ * so "when did we actually finish this?" is answerable.
+ *
+ * Heuristic by necessity: the closer does not tell us which session it belongs
+ * to, so the newest episode in the same project inside the window is taken as
+ * the closing one. Bounded and skipped entirely when nothing matches, so the
+ * worst case is a missing link rather than a wrong one.
+ */
+async function linkTodoClosure(todoId: string, todo: MemoryDoc): Promise<void> {
+  const sessionId = todo.source?.session_id;
+  if (!sessionId) return;
+
+  const origin = await findEpisodeBySession(sessionId);
+  if (!origin) return;
+
+  const recent = await listMemories(
+    { status: ['active'], type: ['episode'], project: [todo.project], since: CLOSURE_WINDOW },
+    2,
+  );
+  const closing = recent.map(toHit).find(e => e.id !== origin.id);
+  if (!closing) return;
+
+  await linkPair(origin.id, closing.id);
+  await linkPair(todoId, closing.id);
+  logger.info({ todoId, origin: origin.id, closing: closing.id }, 'related: todo closure chained');
 }
 
 export interface UpdateInput {
@@ -111,6 +186,9 @@ export async function updateMemory(input: UpdateInput): Promise<RememberResult> 
       { doc: { status: input.status } },
       { refresh: 'wait_for' },
     );
+    if (input.status === 'done' && existing.type === 'todo') {
+      await linkTodoClosure(input.id, existing);
+    }
     logger.info({ id: input.id, status: input.status }, 'update: status');
     return { id: input.id, action: 'updated', project: existing.project, superseded: [] };
   }
@@ -198,6 +276,35 @@ export async function recentEpisodes(days: number, size: number, project?: strin
       ...(project ? { project: [project] } : {}),
     },
     size,
+  );
+  return hits.map(toHit);
+}
+
+/** Episodes older than the Recent window — `days` bounds the block, not the memory. */
+export async function earlierEpisodes(days: number, size: number, project?: string): Promise<MemoryHit[]> {
+  const hits = await listMemories(
+    {
+      status: ['active'],
+      type: ['episode'],
+      until: `now-${days}d`,
+      ...(project ? { project: [project] } : {}),
+    },
+    size,
+  );
+  return hits.map(toHit);
+}
+
+/** Anything the model or the user marked as significant, at any age. */
+export async function milestones(size: number, project?: string): Promise<MemoryHit[]> {
+  const hits = await listMemories(
+    {
+      status: ['active'],
+      type: ['episode', 'decision', 'fact'],
+      minImportance: 4,
+      ...(project ? { project: [project] } : {}),
+    },
+    size,
+    [{ importance: 'desc' }, { occurred_at: 'desc' }],
   );
   return hits.map(toHit);
 }

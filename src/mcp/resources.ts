@@ -1,5 +1,5 @@
-import { ResourceTemplate, type McpServer } from '@modelcontextprotocol/server';
-import { allPreferences } from '../core/memory.js';
+import { ResourceNotFoundError, ResourceTemplate, type McpServer } from '@modelcontextprotocol/server';
+import { allPreferences, getNote } from '../core/memory.js';
 import { listProjects } from '../core/projects.js';
 import { buildSummary } from '../core/summary.js';
 
@@ -51,6 +51,22 @@ export function registerResources(server: McpServer): void {
         },
       ],
     }),
+  );
+
+  // Gives claude.ai and mobile the full note without needing the repo checked out.
+  server.registerResource(
+    'note',
+    new ResourceTemplate('memory://notes/{id}', { list: undefined }),
+    {
+      title: 'Session or decision note',
+      description: 'Full markdown of the note behind a memory. Read when refs point at a file you cannot open.',
+      mimeType: 'text/markdown',
+    },
+    async (uri, { id }) => {
+      const found = await getNote(String(id));
+      if (!found) throw new ResourceNotFoundError(uri.href);
+      return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: found.note }] };
+    },
   );
 
   server.registerResource(

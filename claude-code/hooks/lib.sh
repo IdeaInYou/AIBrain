@@ -21,6 +21,17 @@ mem_post() {
     -H "Content-Type: application/json" --data-binary @-
 }
 
+# Percent-encode one argument for use in a query string.
+urlencode() { jq -rn --arg s "$1" '$s|@uri'; }
+
+# Stable short hash. shasum is on macOS and Linux; md5sum is not on stock macOS.
+shorthash() { printf '%s' "$1" | shasum -a 256 | cut -c1-16; }
+
+slugify() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-48
+}
+
 # Best-effort project slug from the git remote, falling back to the directory name.
 # Matching happens server-side against repo_names/aliases in /api/projects.
 detect_project() {
@@ -39,7 +50,27 @@ detect_project() {
   if [ -n "$slug" ]; then
     printf '%s' "$slug"
   else
-    # Unknown repo: derive a slug locally so the first session still lands somewhere sane.
     basename "$hint" .git | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//'
   fi
+}
+
+# --- git safety -------------------------------------------------------------
+
+# True when the repo is mid-operation and an automatic commit would interfere.
+git_busy() {
+  local g
+  g="$(git -C "$1" rev-parse --git-dir 2>/dev/null)" || return 0
+  [ -d "$1/$g/rebase-merge" ] || [ -d "$1/$g/rebase-apply" ] && return 0
+  [ -e "$1/$g/MERGE_HEAD" ] || [ -e "$1/$g/CHERRY_PICK_HEAD" ] || [ -e "$1/$g/REVERT_HEAD" ] && return 0
+  # Detached HEAD: committing here strands the commit on no branch.
+  git -C "$1" symbolic-ref -q HEAD >/dev/null 2>&1 || return 0
+  return 1
+}
+
+MEMORY_PENDING_LOG="$HOME/.claude/memory-pending-commits.log"
+
+# Records a repo whose notes were written but not committed, so the next
+# SessionStart in that repo can finish the job.
+note_pending_commit() {
+  printf '%s\t%s\n' "$(date -u +%FT%TZ)" "$1" >> "$MEMORY_PENDING_LOG"
 }

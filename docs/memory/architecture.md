@@ -36,6 +36,8 @@
 - Added refs (keyword), related (keyword), note (text, index:false), episode.commits (object with sha/message); refs union and note replace on repeat Stop; bidirectional link writes via scripted bulk update <!-- k:memories index -->
 - Bidirectional keyword links to top 5 neighbors across all types by cosine ≥0.75, written via scripted bulk update <!-- k:memories.related -->
 - refs: keyword links to ADRs and sessions; note: unindexed markdown (20 KB typical), not searchable <!-- k:memories.refs/note -->
+- Now accepts refs (keywords to ADR/decision docs) and note (session summary markdown); returned via note_resource URI in recall. <!-- k:memory_remember tool -->
+- Bidirectional kNN links (cosine ≥0.75) across all types per project; appears in recall as see_also; deferred→todo closure chains to origin episode. <!-- k:related links -->
 <!-- memory:end Data flow -->
 
 ## Integrations

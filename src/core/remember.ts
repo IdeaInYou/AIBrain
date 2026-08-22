@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { INDEX, LIMITS, config } from '../config.js';
 import { embedOne } from '../embed/embedder.js';
 import { logger } from '../logger.js';
-import { contentHash, findByHash, findNearDuplicate } from '../search/dedupe.js';
+import { contentHash, cosine, findByHash, findNearDuplicate } from '../search/dedupe.js';
+import { knnSearch } from '../search/hybrid.js';
 import { osRequest } from '../search/client.js';
 import {
   DEDUPED_TYPES,
@@ -126,6 +127,31 @@ async function findDeferredTodo(sessionId: string): Promise<{ id: string; doc: M
   return hit ? { id: hit._id, doc: hit._source } : null;
 }
 
+/** The nearest active decision in the project, if it is close enough to count. */
+async function findCoveringDecision(
+  vector: number[],
+  project: string,
+): Promise<{ id: string; similarity: number } | null> {
+  try {
+    const hits = await knnSearch(vector, { project: [project], type: ['decision'], status: ['active'] }, 3);
+    let best: { id: string; similarity: number } | null = null;
+    for (const hit of hits) {
+      const stored = hit._source.embedding;
+      if (!stored) continue;
+      const similarity = cosine(vector, stored);
+      if (similarity >= config.TODO_DECISION_THRESHOLD && (!best || similarity > best.similarity)) {
+        best = { id: hit._id, similarity };
+      }
+    }
+    return best;
+  } catch (err) {
+    // Failing open means a spurious todo, which is recoverable. Failing closed
+    // would silently drop real open work.
+    logger.warn({ err: (err as Error).message }, 'covering-decision check failed; creating the todo anyway');
+    return null;
+  }
+}
+
 /**
  * `deferred` is the only part of an episode that is still open work, so it also
  * lives as a real todo — otherwise it is invisible to the Open todos block and
@@ -179,11 +205,31 @@ async function syncDeferredTodo(args: {
     return;
   }
 
+  const embedding = await embedOne(deferred, 'passage');
+
+  // The subject may already be settled by a decision — "we decided not to do
+  // this" is recorded as a decision, and turning the same text into an open todo
+  // would resurrect closed work every session.
+  //
+  // NOTE: cosine measures topical overlap, not negation. It cannot tell a
+  // contradiction from an agreement, so this suppresses any deferred item whose
+  // subject an active decision already covers. That is the intended effect, but
+  // it is broader than "contradicts" — a decision that *mandates* the work also
+  // suppresses the todo. Raise TODO_DECISION_THRESHOLD if that bites.
+  const covering = await findCoveringDecision(embedding, args.project);
+  if (covering) {
+    logger.info(
+      { session_id: args.sessionId, decision: covering.id, cosine: Number(covering.similarity.toFixed(4)) },
+      'deferred todo skipped: an active decision already covers this subject',
+    );
+    return;
+  }
+
   const id = randomUUID();
   const timestamp = nowIso();
   await writeDoc(id, {
     content: deferred,
-    embedding: await embedOne(deferred, 'passage'),
+    embedding,
     type: 'todo',
     project: args.project,
     tags: ['deferred'],

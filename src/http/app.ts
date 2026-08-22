@@ -8,6 +8,7 @@ import { mountHealth } from './routes/health.js';
 import { mountIngest } from './routes/ingest.js';
 import { mountMcp } from './routes/mcp.js';
 import { mountOAuth } from './routes/oauth.js';
+import { mountMaintenance } from './routes/maintenance.js';
 import { mountProjects } from './routes/projects.js';
 import { mountStats } from './routes/stats.js';
 import { mountSummary } from './routes/summary.js';
@@ -62,6 +63,7 @@ export function createApp(): Hono {
   mountSummary(app);
   mountProjects(app);
   mountStats(app);
+  mountMaintenance(app);
 
   app.onError((err, c) => {
     logger.error({ err: err.message, path: c.req.path }, 'request failed');

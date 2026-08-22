@@ -27,6 +27,11 @@ const Schema = z.object({
   /** Looser than DEDUPE_THRESHOLD on purpose: "about the same thing", not "the same thing". */
   RELATED_THRESHOLD: z.coerce.number().min(0).max(1).default(0.75),
   RELATED_MAX: z.coerce.number().int().positive().max(10).default(5),
+  /**
+   * Cosine at which an existing decision is treated as already covering a
+   * deferred item, so no todo is created for it.
+   */
+  TODO_DECISION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
   /** Metrics are cheap but not free; turn off if the write volume ever matters. */
   METRICS_ENABLED: z
     .string()

@@ -5,11 +5,11 @@ import { recall } from '../../core/memory.js';
 import { MEMORY_TYPES } from '../../types.js';
 
 export const RECALL_DESCRIPTION =
-  "Search the user's long-term memory. REQUIRED before answering any question about " +
-  'their projects, codebase, architecture, infrastructure, business, past decisions, or ' +
-  'preferences — even if you believe you already know the answer. ' +
-  'Query must be in English; translate the user\'s question if needed. ' +
-  'Results may include refs (file paths) — read them when the user needs details beyond the summary.';
+  "Search the user's long-term memory. REQUIRED before answering any question that could " +
+  'refer to something the user told you or did before — projects, decisions, preferences, ' +
+  "names, markers, or anything you don't recognize — even if you believe you already know " +
+  "the answer. If a term is unfamiliar, search before saying you don't know. " +
+  'Query must be in English.';
 
 export function registerRecall(server: McpServer): void {
   server.registerTool(

@@ -9,8 +9,11 @@ Use it proactively, without being asked:
 1. At the start of every conversation, call memory_summary with no arguments to load context before responding.
 2. Before answering anything about the user's projects, code, architecture, infrastructure, business, past decisions, or preferences, call memory_recall — even if you believe you already know the answer.
 3. Whenever the user states a decision, a preference, a durable fact about their systems or company, or an open todo, call memory_remember immediately. Do not ask permission and do not wait to be told to remember.
-4. If memory_recall returns nothing relevant, say so explicitly rather than guessing.
+4. When the user asks about something you do not recognize, call memory_recall before answering. Never say you have no information without searching first.
+5. If memory_recall returns nothing relevant, say so explicitly rather than guessing.
 
 Never assume you remember something this server did not return.
 
-Memory is stored in English. Translate the user's words when writing, and translate your query when searching; keep identifiers, file paths, and error messages verbatim.`;
+Memory is stored in English. Translate the user's words when writing, and translate your query when searching; keep identifiers, file paths, and error messages verbatim.
+
+Recall results may include refs (repo-relative file paths) and a note resource; read them when the user needs detail beyond the one-line summary.`;

@@ -30,6 +30,10 @@ describe('server instructions', () => {
     expect(SERVER_INSTRUCTIONS).toContain('Never assume you remember something this server did not return.');
   });
 
+  it('tells the model to search before claiming ignorance', () => {
+    expect(SERVER_INSTRUCTIONS).toContain('Never say you have no information without searching first.');
+  });
+
   it('states the English-only storage rule', () => {
     expect(SERVER_INSTRUCTIONS).toMatch(/stored in English/i);
   });
@@ -64,6 +68,14 @@ describe('tool list', () => {
     const byName = new Map((await listTools()).map(t => [t.name, t.description ?? '']));
     expect(byName.get('memory_recall')).toContain('even if you believe you already know the answer');
     expect(byName.get('memory_remember')).toContain('Do not ask permission');
+  });
+
+  // The most common failure is answering "I don't know" about a term the user
+  // has already stored, so the trigger has to cover unfamiliar words explicitly.
+  it('memory_recall covers unfamiliar terms, not just known project topics', async () => {
+    const desc = (await listTools()).find(t => t.name === 'memory_recall')?.description ?? '';
+    expect(desc).toMatch(/unfamiliar/);
+    expect(desc).toMatch(/don't recognize/);
   });
 
   it('tells the model to write and search in English', async () => {

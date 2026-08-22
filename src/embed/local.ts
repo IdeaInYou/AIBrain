@@ -1,4 +1,4 @@
-import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import { env, pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import type { EmbedKind, Embedder } from './embedder.js';
@@ -39,6 +39,12 @@ class LocalEmbedder implements Embedder {
 export async function createLocalEmbedder(): Promise<Embedder> {
   const started = Date.now();
   logger.info({ model: config.EMBED_MODEL, dtype: config.EMBED_DTYPE }, 'loading embedding model');
+
+  // The library otherwise also tries a second cache under node_modules, which
+  // the container cannot write to (runs as `node`, /app is root-owned) and which
+  // would not survive a redeploy anyway. MODEL_CACHE_DIR is the volume.
+  env.cacheDir = config.MODEL_CACHE_DIR;
+  env.useBrowserCache = false;
 
   // First boot downloads from huggingface.co into MODEL_CACHE_DIR; later boots are offline.
   const extractor = await pipeline('feature-extraction', config.EMBED_MODEL, {

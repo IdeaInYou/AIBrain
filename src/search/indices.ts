@@ -1,6 +1,6 @@
 import { INDEX, SEARCH_PIPELINE, config } from '../config.js';
 import { logger } from '../logger.js';
-import { osRequest, statusOf } from './client.js';
+import { osExists, osRequest, statusOf } from './client.js';
 
 /** Storage is English-only, so the built-in `english` analyzer is enough — no ICU plugin. */
 export function memoriesMapping(dim: number) {
@@ -78,19 +78,16 @@ export const hybridPipeline = {
   ],
 };
 
-async function indexExists(name: string): Promise<boolean> {
-  try {
-    await osRequest('HEAD', `/${name}`);
-    return true;
-  } catch (err) {
-    if (statusOf(err) === 404) return false;
-    throw err;
-  }
-}
-
 async function ensureIndex(name: string, body: unknown): Promise<'created' | 'exists'> {
-  if (await indexExists(name)) return 'exists';
-  await osRequest('PUT', `/${name}`, body);
+  if (await osExists(`/${name}`)) return 'exists';
+  try {
+    await osRequest('PUT', `/${name}`, body);
+  } catch (err) {
+    // resource_already_exists_exception — something created it between the
+    // check and the write. Not an error for an idempotent bootstrap.
+    if (statusOf(err) !== 400) throw err;
+    return 'exists';
+  }
   return 'created';
 }
 
@@ -113,9 +110,20 @@ export async function ensureIndices(): Promise<Record<string, string>> {
  * index time. Catch it at boot instead.
  */
 export async function assertEmbedDim(expected: number): Promise<void> {
-  const mapping = await osRequest<
-    Record<string, { mappings?: { properties?: { embedding?: { dimension?: number } } } }>
-  >('GET', `/${INDEX.memories}/_mapping`);
+  let mapping: Record<string, { mappings?: { properties?: { embedding?: { dimension?: number } } } }>;
+  try {
+    mapping = await osRequest('GET', `/${INDEX.memories}/_mapping`);
+  } catch (err) {
+    if (statusOf(err) === 404) {
+      // ensureIndices() ran and claimed success, so an absent index means the
+      // existence check lied — say that, rather than surfacing a bare 404.
+      throw new Error(
+        `Index ${INDEX.memories} is missing immediately after ensureIndices() reported success. ` +
+          'Index creation was skipped by a faulty existence check.',
+      );
+    }
+    throw err;
+  }
   const actual = Object.values(mapping)[0]?.mappings?.properties?.embedding?.dimension;
   if (actual !== undefined && actual !== expected) {
     throw new Error(

@@ -36,6 +36,22 @@ export async function osRequest<T = unknown>(
   return res.body as T;
 }
 
+/**
+ * HEAD-based existence check.
+ *
+ * Do NOT write this as `try { osRequest('HEAD', …) } catch (404)`. The client
+ * deliberately does not throw for HEAD + 404 — Transport.js: "ignore the
+ * statusCode … if the request method is HEAD and the statusCode is 404" — and
+ * casts the body to a boolean instead. A try/catch therefore reports every
+ * index as already existing, so nothing is ever created.
+ */
+export async function osExists(path: string): Promise<boolean> {
+  const transport = os.transport as unknown as RawTransport;
+  const res = await transport.request({ method: 'HEAD', path });
+  if (typeof res.body === 'boolean') return res.body;
+  return (res.statusCode ?? 500) < 400;
+}
+
 export function statusOf(err: unknown): number | undefined {
   const s = (err as { statusCode?: unknown } | null)?.statusCode;
   return typeof s === 'number' ? s : undefined;

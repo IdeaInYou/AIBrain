@@ -141,6 +141,46 @@ async function ensureIndex(name: string, body: unknown): Promise<'created' | 'ex
   return 'created';
 }
 
+/**
+ * Fields added to `memories` after the index already existed.
+ *
+ * `ensureIndex` only creates, never alters, so without this a new field is left
+ * to dynamic mapping the first time a document carries it. That is silent and
+ * wrong: `note` would be indexed as searchable text — 20 KB of markdown per
+ * record, for a field that is never searched.
+ *
+ * A `PUT _mapping` is idempotent and additive. It only fails on a type conflict
+ * with an already-mapped field, which is worth a warning rather than a crash:
+ * the server still runs, just with a suboptimal mapping.
+ */
+async function ensureMappings(): Promise<void> {
+  const additions = {
+    properties: {
+      refs: { type: 'keyword' },
+      related: { type: 'keyword' },
+      note: { type: 'text', index: false },
+      episode: {
+        properties: {
+          commits: {
+            type: 'object',
+            properties: { sha: { type: 'keyword' }, message: { type: 'text', analyzer: 'english' } },
+          },
+        },
+      },
+    },
+  };
+
+  try {
+    await osRequest('PUT', `/${INDEX.memories}/_mapping`, additions);
+    logger.info({ index: INDEX.memories }, 'mappings up to date');
+  } catch (err) {
+    logger.warn(
+      { index: INDEX.memories, err: (err as Error).message },
+      'mapping update failed — a field may already be mapped with a conflicting type; reindex to fix',
+    );
+  }
+}
+
 /** Idempotent: safe on every boot and from `npm run init-index`. */
 export async function ensureIndices(): Promise<Record<string, string>> {
   const result: Record<string, string> = {
@@ -149,6 +189,9 @@ export async function ensureIndices(): Promise<Record<string, string>> {
     [INDEX.oauth]: await ensureIndex(INDEX.oauth, oauthMapping),
     [INDEX.events]: await ensureIndex(INDEX.events, eventsMapping),
   };
+
+  // Runs whether the index was just created or already existed.
+  await ensureMappings();
 
   await osRequest('PUT', `/_search/pipeline/${SEARCH_PIPELINE}`, hybridPipeline);
   result[`pipeline:${SEARCH_PIPELINE}`] = 'applied';

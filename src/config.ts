@@ -30,8 +30,13 @@ const Schema = z.object({
   /**
    * Cosine at which an existing decision is treated as already covering a
    * deferred item, so no todo is created for it.
+   *
+   * Calibrated at 0.75, not 0.8: measured against real data, "Rotate the auth
+   * token before launch." against the decision that settled it scores 0.764,
+   * while an unrelated deferred item scores 0.507. A short todo compared to a
+   * longer decision sentence dilutes cosine, so 0.8 never fires in practice.
    */
-  TODO_DECISION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
+  TODO_DECISION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.75),
   /** Metrics are cheap but not free; turn off if the write volume ever matters. */
   METRICS_ENABLED: z
     .string()

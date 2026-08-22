@@ -18,7 +18,8 @@
 - /.well-known/oauth-protected-resource, /.well-known/oauth-authorization-server, /oauth/register, /authorize (consent), /token, /revoke. <!-- k:OAuth endpoints -->
 - Now accepts OAuth tokens OR static bearer; returns WWW-Authenticate header for clients to detect OAuth support. <!-- k:GET /mcp -->
 - OAuth service (DCR, PKCE S256, token storage) and HTTP routes for single-user register-authorize-token-revoke flow <!-- k:src/oauth/ -->
-- Episode deduplication now scopes to session_id; repeat Stop hooks update the same episode rather than create duplicates. <!-- k:src/core/remember.ts -->
+- Episodes now dedupe on source.session_id (one per session, updates not creates); deferred field auto-creates type=todo with same session_id <!-- k:src/core/remember.ts -->
+- Discovery docs, /register DCR, /authorize consent, /token code↔bearer, /revoke family-revocation <!-- k:src/http/routes/oauth.ts -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -33,6 +34,8 @@
 - DCR clients, authorization codes, access/refresh tokens; never recreated on boot <!-- k:oauth index -->
 - Metrics only: operation kind, client, project, latency, zero-result flag, top score, cached flag; no memory content <!-- k:events index -->
 - Added refs (keyword), related (keyword), note (text, index:false), episode.commits (object with sha/message); refs union and note replace on repeat Stop; bidirectional link writes via scripted bulk update <!-- k:memories index -->
+- Bidirectional keyword links to top 5 neighbors across all types by cosine ≥0.75, written via scripted bulk update <!-- k:memories.related -->
+- refs: keyword links to ADRs and sessions; note: unindexed markdown (20 KB typical), not searchable <!-- k:memories.refs/note -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -46,6 +49,9 @@
 - Pre-tool recall; fetches /api/file-context per edited file, emits JSON hookSpecificOutput with additionalContext <!-- k:PreToolUse hook (Edit/Write/MultiEdit) -->
 - Dynamic Client Registration endpoint /register; consent screen with password auth; token endpoint /token; revoke; persisted in oauth index, survives restarts <!-- k:OAuth with DCR -->
 - Edit|Write|MultiEdit → file-context recall; Bash (filtered to deploy keywords) → recall on command name; emit JSON additionalContext for /api/file-context <!-- k:PreToolUse hooks -->
+- Dynamic Client Registration on /register; clients, codes, tokens persisted in oauth index; supports web/mobile/Desktop without manual credential setup <!-- k:OAuth 2.0 with DCR -->
+- Git hook at repo level ingests commits to /api/ingest/commit; attaches to live episode if project+device match within 2h, or creates light episode <!-- k:Post-commit hook -->
+- PreToolUse hook injects file context (earlier work on the file) via additionalContext JSON; Bash hook filters to ops (docker/traefik/deploy/migrat) <!-- k:Pre-tool recall -->
 <!-- memory:end Integrations -->
 
 ## Infrastructure

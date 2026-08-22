@@ -233,38 +233,112 @@ export interface ForgetInput {
   reason?: string;
 }
 
-/** Soft delete only. Hard delete lives in scripts/, deliberately off the MCP surface. */
-export async function forget(input: ForgetInput): Promise<{ deleted: number }> {
-  if (input.id) {
+/** Builds the query clauses shared by bulk forget. */
+function forgetFilter(f: NonNullable<ForgetInput['filter']>): unknown[] {
+  const filter: unknown[] = [{ terms: { status: ['active'] } }];
+  if (f.project) filter.push({ term: { project: f.project } });
+  if (f.type?.length) filter.push({ terms: { type: f.type } });
+  if (f.tags?.length) filter.push({ terms: { tags: f.tags } });
+  if (f.before) filter.push({ range: { occurred_at: { lt: parseSince(f.before) } } });
+  return filter;
+}
+
+/**
+ * Strips deleted ids out of every `related` array that points at them.
+ *
+ * Soft delete never needed this — hydrateRelated skips non-active records. A
+ * hard delete leaves ids that resolve to nothing, so they are removed at the
+ * source rather than filtered forever after.
+ */
+async function purgeBacklinks(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  try {
     await osRequest(
       'POST',
-      `/${INDEX.memories}/_update/${input.id}`,
-      { doc: { status: 'deleted' } },
-      { refresh: 'wait_for' },
+      `/${INDEX.memories}/_update_by_query`,
+      {
+        query: { terms: { related: ids } },
+        script: {
+          source: 'if (ctx._source.related != null) { ctx._source.related.removeAll(params.ids) }',
+          params: { ids },
+        },
+      },
+      { refresh: 'true', conflicts: 'proceed' },
     );
-    logger.info({ id: input.id, reason: input.reason }, 'forget: single');
-    return { deleted: 1 };
+  } catch (err) {
+    // A stale backlink is cosmetic; never fail the delete over it.
+    logger.warn({ err: (err as Error).message, count: ids.length }, 'forget: backlink purge failed');
+  }
+}
+
+/**
+ * Removes memories permanently by default (FORGET_HARD_DELETE).
+ *
+ * There is no undo, and this tool is model-callable — set FORGET_HARD_DELETE=false
+ * to fall back to the soft delete, which hides a record from every query while
+ * keeping it recoverable.
+ */
+export async function forget(input: ForgetInput): Promise<{ deleted: number; hard: boolean }> {
+  const hard = config.FORGET_HARD_DELETE;
+
+  if (input.id) {
+    if (hard) {
+      await purgeBacklinks([input.id]);
+      try {
+        await osRequest('DELETE', `/${INDEX.memories}/_doc/${input.id}`, undefined, { refresh: 'wait_for' });
+      } catch (err) {
+        if (statusOf(err) === 404) return { deleted: 0, hard };
+        throw err;
+      }
+    } else {
+      await osRequest(
+        'POST',
+        `/${INDEX.memories}/_update/${input.id}`,
+        { doc: { status: 'deleted' } },
+        { refresh: 'wait_for' },
+      );
+    }
+    logger.info({ id: input.id, hard, reason: input.reason }, 'forget: single');
+    return { deleted: 1, hard };
   }
 
   if (!input.filter || Object.keys(input.filter).length === 0) {
     throw new Error('forget requires either an id or a non-empty filter');
   }
 
-  const filter: unknown[] = [{ terms: { status: ['active'] } }];
-  if (input.filter.project) filter.push({ term: { project: input.filter.project } });
-  if (input.filter.type?.length) filter.push({ terms: { type: input.filter.type } });
-  if (input.filter.tags?.length) filter.push({ terms: { tags: input.filter.tags } });
-  if (input.filter.before) filter.push({ range: { occurred_at: { lt: parseSince(input.filter.before) } } });
+  const filter = forgetFilter(input.filter);
 
-  const res = await osRequest<{ updated: number }>(
+  if (!hard) {
+    const res = await osRequest<{ updated: number }>(
+      'POST',
+      `/${INDEX.memories}/_update_by_query`,
+      { query: { bool: { filter } }, script: { source: "ctx._source.status = 'deleted'" } },
+      { refresh: 'true', conflicts: 'proceed' },
+    );
+    logger.info({ deleted: res.updated, hard, reason: input.reason }, 'forget: bulk');
+    return { deleted: res.updated, hard };
+  }
+
+  // Collect the ids first: _delete_by_query does not report them, and the
+  // backlinks have to be cleaned before the documents disappear.
+  const found = await osRequest<{ hits: { hits: { _id: string }[] } }>('POST', `/${INDEX.memories}/_search`, {
+    size: 1000,
+    _source: false,
+    query: { bool: { filter } },
+  });
+  const ids = found.hits.hits.map(h => h._id);
+  if (ids.length === 0) return { deleted: 0, hard };
+
+  await purgeBacklinks(ids);
+  const res = await osRequest<{ deleted: number }>(
     'POST',
-    `/${INDEX.memories}/_update_by_query`,
-    { query: { bool: { filter } }, script: { source: "ctx._source.status = 'deleted'" } },
+    `/${INDEX.memories}/_delete_by_query`,
+    { query: { ids: { values: ids } } },
     { refresh: 'true', conflicts: 'proceed' },
   );
 
-  logger.info({ deleted: res.updated, reason: input.reason }, 'forget: bulk');
-  return { deleted: res.updated };
+  logger.info({ deleted: res.deleted, hard, reason: input.reason }, 'forget: bulk');
+  return { deleted: res.deleted, hard };
 }
 
 export async function recentEpisodes(days: number, size: number, project?: string): Promise<MemoryHit[]> {

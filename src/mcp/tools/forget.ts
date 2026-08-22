@@ -4,7 +4,8 @@ import { forget } from '../../core/memory.js';
 import { MEMORY_TYPES } from '../../types.js';
 
 export const FORGET_DESCRIPTION =
-  'Remove a memory by id, or by filter. Use only when the user explicitly asks to forget something.';
+  'Permanently delete a memory by id, or by filter. This cannot be undone. ' +
+  'Use only when the user explicitly asks to forget or delete something, and prefer id over filter.';
 
 export function registerForget(server: McpServer): void {
   server.registerTool(

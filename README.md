@@ -247,7 +247,7 @@ The server is named `memory`, so tools render as `memory_*` and the prefix docum
 | `memory_recall` | Search. Query must be in English — the tool tells Claude to translate. Supports `since`/`until`. |
 | `memory_remember` | Write. `content` in English; `type=episode` takes a structured `episode` object; `refs`/`note` link repo files. |
 | `memory_update` | Amend by id; `status: "done"` closes a todo. |
-| `memory_forget` | Soft delete by id or filter. |
+| `memory_forget` | **Permanent** delete by id or filter — no undo. |
 
 Every description is capped at 400 characters, enforced by a test.
 

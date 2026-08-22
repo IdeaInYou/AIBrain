@@ -84,6 +84,14 @@ describe('tool list', () => {
     expect(byName.get('memory_remember')).toMatch(/in English/);
   });
 
+  // Irreversible operations must announce themselves, or the model treats a
+  // delete as no more consequential than a search.
+  it('memory_forget warns that deletion is permanent', async () => {
+    const desc = (await listTools()).find(t => t.name === 'memory_forget')?.description ?? '';
+    expect(desc).toMatch(/Permanently delete/);
+    expect(desc).toMatch(/cannot be undone/);
+  });
+
   it('keeps every description under 400 characters', async () => {
     const tooLong = (await listTools())
       .map(t => ({ name: t.name, length: (t.description ?? '').length }))

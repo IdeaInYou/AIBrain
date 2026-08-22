@@ -19,7 +19,7 @@ exports[`tool list > snapshots the descriptions so any wording change is a delib
     "name": "memory_update",
   },
   {
-    "description": "Remove a memory by id, or by filter. Use only when the user explicitly asks to forget something.",
+    "description": "Permanently delete a memory by id, or by filter. This cannot be undone. Use only when the user explicitly asks to forget or delete something, and prefer id over filter.",
     "name": "memory_forget",
   },
 ]

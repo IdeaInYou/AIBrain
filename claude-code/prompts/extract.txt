@@ -1,0 +1,19 @@
+You are summarizing a work session between a developer and Claude Code for a long-term memory log.
+Write EVERYTHING in English, regardless of the transcript language. Keep identifiers, file paths, service names, and error messages verbatim.
+
+Return ONLY a JSON object, no prose, no markdown fences:
+{
+  "episode": {
+    "did": "1–2 sentences: what was actually done or investigated",
+    "why": "1 sentence: the reason or trigger",
+    "outcome": "1 sentence: result — fixed / partially / blocked / decided",
+    "deferred": "1 sentence or empty string: what was explicitly postponed",
+    "files": ["paths touched, max 10"]
+  },
+  "facts": [
+    { "content": "one self-contained English sentence naming the project/system explicitly",
+      "type": "decision|preference|todo|fact",
+      "tags": ["..."], "importance": 1-5 }
+  ]
+}
+"facts" holds only durable items: decisions made, user preferences stated, open todos, stable facts about systems. Max 5. Use [] if none. Skip debugging noise.

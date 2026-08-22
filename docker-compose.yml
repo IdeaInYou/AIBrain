@@ -1,0 +1,61 @@
+services:
+  aibrain_opensearch:
+    container_name: aibrain_opensearch
+    image: opensearchproject/opensearch:2
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - DISABLE_SECURITY_PLUGIN=true # internal network only — never expose this port
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - os-data:/usr/share/opensearch/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  aibrain:
+    container_name: aibrain
+    image: repo-register.ideainyou.com/aibrain:$DOCKER_IMAGE_TAG
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - OPENSEARCH_URL=http://opensearch:9200
+      - MODEL_CACHE_DIR=/models
+    volumes:
+      - model-cache:/models
+    depends_on:
+      aibrain_opensearch:
+        condition: service_healthy
+    networks: [internal, registry_default]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      # first boot downloads the embedding model from huggingface.co
+      start_period: 300s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=registry_default
+      - traefik.http.routers.memory.rule=Host(`memory.${MEMORY_DOMAIN:-example.com}`)
+      - traefik.http.routers.memory.entrypoints=websecure
+      - traefik.http.routers.memory.tls.certresolver=le
+      - traefik.http.services.memory.loadbalancer.server.port=3000
+
+volumes:
+  os-data: {}
+  model-cache: {}
+
+networks:
+  internal: {}
+  registry_default:
+    external: true

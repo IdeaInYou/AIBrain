@@ -21,6 +21,7 @@
 - Episodes now dedupe on source.session_id (one per session, updates not creates); deferred field auto-creates type=todo with same session_id <!-- k:src/core/remember.ts -->
 - Discovery docs, /register DCR, /authorize consent, /token code↔bearer, /revoke family-revocation <!-- k:src/http/routes/oauth.ts -->
 - Added fields: refs (keyword, ADR paths), related (keyword, bidirectional link ids), note (text, index:false), episode.commits (object with sha/message) <!-- k:memories mapping -->
+- Contextum bridge: contextum_search tool queries .contextum/agents, .contextum/coord/tasks.json, .contextum/context.yaml for coordination state <!-- k:src/core/contextum.ts -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -42,6 +43,9 @@
 - Episodes dedupe on source.session_id instead of never; repeat Stop hook overwrites did/why/outcome/deferred/files rather than creating duplicate <!-- k:session-scoped episodes -->
 - Non-empty deferred creates type=todo record; todo auto-closes (status=done) when deferred empties on repeat Stop <!-- k:deferred→todo pipeline -->
 - post-commit hook ingests commits to /api/ingest/commit; attaches to same-device episode within 2h window or creates lightweight standalone episode <!-- k:git integration -->
+- PreToolUse hook injects file history via additionalContext JSON; Edit/Write/MultiEdit tools get 4 lines of related episodes; Bash hook fires on deploy/docker/traefik/migrate patterns <!-- k:Pre-tool recall -->
+- Stop hook runs claude -p extraction, creates session note with did/why/outcome/deferred/files, commits to docs/memory/sessions/{id}.md via git post-commit hook <!-- k:Session journaling -->
+- On every write: kNN across all types in project, cosine ≥0.75, top-5 auto-linked bidirectionally via scripted bulk update; recall returns see_also (top-3, deduped) <!-- k:Related links -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -66,6 +70,7 @@
 - OpenSearch index persisting DCR clients, authorization codes, access/refresh tokens, with SHA-256 hashing and family revocation. <!-- k:oauth index -->
 - Query metrics: recall count, zero-result %, latency p50/p95, pre-tool hit/miss, writes by source_kind. <!-- k:events index -->
 - Unknown session id now returns 404 (not 400) to signal re-initialize; idle expiry at 1h; prevents stream leaks <!-- k:MCP sessions -->
+- memories (with episode.commits, refs, note, related), projects, oauth (clients, codes, tokens, families), events (ts, kind, client, project, latency_ms, hits, top_score, cached) <!-- k:OpenSearch indices -->
 <!-- memory:end Infrastructure -->
 
 ## Config
@@ -75,6 +80,7 @@
 - Cosine ≥ threshold for fact/decision deduplication; 0.82 measured safe on production data <!-- k:DEDUPE_THRESHOLD -->
 - Cosine ≥ threshold to suppress deferred todo when decision covers it; 0.75 default from real measurement <!-- k:TODO_DECISION_THRESHOLD -->
 - Enable metrics collection (default true); /api/stats returns 503 if disabled <!-- k:METRICS_ENABLED -->
+- true (default): memory_forget removes documents outright; false: reverts to soft delete (status=deleted, recoverable) <!-- k:FORGET_HARD_DELETE -->
 <!-- memory:end Config -->
 
-_Last auto-update: 2026-08-22 (session 57cf8914)_
+_Last auto-update: 2026-09-02 (session d166fd70)_

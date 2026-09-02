@@ -30,6 +30,8 @@
 - Daily/weekly memory summaries by project and date with fact/decision/todo highlights <!-- k:src/core/digest.ts -->
 - Auto-detection and merge of duplicates (cosine ≥0.95) via scheduled tasks with cascade supersede <!-- k:src/core/selfHealing.ts -->
 - Bulk memory import from NDJSON/CSV with automatic embedding and deduplication <!-- k:src/core/imports.ts -->
+- Semantic reranking with bge-reranker-base model; RRF fusion of BM25 + kNN scores; activated on >30% zero-result <!-- k:src/core/reranker.ts -->
+- Auto-detect duplicates (cosine >0.95); merge + supersede without manual; background task <!-- k:src/core/selfHeal.ts -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -47,7 +49,7 @@
 - Bidirectional keyword links to top 5 neighbors across all types by cosine ≥0.75, written via scripted bulk update <!-- k:memories.related -->
 - refs: keyword links to ADRs and sessions; note: unindexed markdown (20 KB typical), not searchable <!-- k:memories.refs/note -->
 - Now accepts refs (keywords to ADR/decision docs) and note (session summary markdown); returned via note_resource URI in recall. <!-- k:memory_remember tool -->
-- Bidirectional kNN links (cosine ≥0.75) across all types per project; appears in recall as see_also; deferred→todo closure chains to origin episode. <!-- k:related links -->
+- Bidirectional cosine ≥0.75; top-5 per record; kNN across all types; backlinks via scripted bulk update; see_also deduped against query results <!-- k:related links -->
 - Episodes dedupe on source.session_id instead of never; repeat Stop hook overwrites did/why/outcome/deferred/files rather than creating duplicate <!-- k:session-scoped episodes -->
 - Non-empty deferred creates type=todo record; todo auto-closes (status=done) when deferred empties on repeat Stop <!-- k:deferred→todo pipeline -->
 - post-commit hook ingests commits to /api/ingest/commit; attaches to same-device episode within 2h window or creates lightweight standalone episode <!-- k:git integration -->
@@ -58,6 +60,10 @@
 - Non-empty episode.deferred auto-creates type=todo; when deferred empties, todo status→done; session_id links them <!-- k:Deferred todo chain -->
 - Post-commit hook sends commit sha, message, files, stat to /api/ingest/commit; attaches to live episode or creates light one <!-- k:Git commit ingestion -->
 - Type-aware rerank → semantic rerank (bge-reranker-base if metrics show >30% zero-result) → top-K <!-- k:search-ranking -->
+- Session-scoped dedupe on source.session_id; deferred field creates linked todo (status=active); closure chains episodes via session proximity <!-- k:episodes -->
+- PreToolUse hook injects /api/file-context results as additionalContext JSON before tool calls; 240 chars/line, ≤4 lines per file <!-- k:pre-tool recall -->
+- post-commit hook ingests commits via /api/ingest/commit; attaches to live episode (same project/device, ≤2h) or creates lightweight episode <!-- k:git commits -->
+- Events index records recalls, writes, latency, cache hits; /api/stats emits zero-result%, p50/p95 latency, verdicts on search quality <!-- k:metrics -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -77,6 +83,7 @@
 - PKCE S256, DCR (clients self-register), password-protected consent, token rotation with refresh-token family revocation, 1h idle expiry for sessions <!-- k:OAuth 2.0 service -->
 - contextum_search tool queries .contextum/ coordination state; added via npm package with string matching on tasks, agents, locks <!-- k:Contextum MCP Bridge -->
 - contextum NPM package; MCP tool for querying .contextum/ coordination state (tasks, locks, agents) <!-- k:Contextum -->
+- DCR + static-bearer fallback; works on web, mobile, Desktop, Code; state in oauth index; PUBLIC_URL enables it <!-- k:OAuth 2.0 -->
 <!-- memory:end Integrations -->
 
 ## Infrastructure
@@ -85,7 +92,7 @@
 - Query metrics: recall count, zero-result %, latency p50/p95, pre-tool hit/miss, writes by source_kind. <!-- k:events index -->
 - Unknown session id now returns 404 (not 400) to signal re-initialize; idle expiry at 1h; prevents stream leaks <!-- k:MCP sessions -->
 - memories (with episode.commits, refs, note, related), projects, oauth (clients, codes, tokens, families), events (ts, kind, client, project, latency_ms, hits, top_score, cached) <!-- k:OpenSearch indices -->
-- OPENSEARCH_URL fixed to http://aibrain_opensearch:9200; Traefik labels production-ready <!-- k:docker-compose.yml -->
+- Fixed OPENSEARCH_URL from 'http://opensearch' to 'http://aibrain_opensearch'; updated Traefik labels to current syntax <!-- k:docker-compose.yml -->
 <!-- memory:end Infrastructure -->
 
 ## Config
@@ -96,6 +103,7 @@
 - Cosine ≥ threshold to suppress deferred todo when decision covers it; 0.75 default from real measurement <!-- k:TODO_DECISION_THRESHOLD -->
 - Enable metrics collection (default true); /api/stats returns 503 if disabled <!-- k:METRICS_ENABLED -->
 - true (default): memory_forget removes documents outright; false: reverts to soft delete (status=deleted, recoverable) <!-- k:FORGET_HARD_DELETE -->
+- Auto-activates if metrics show >30% zero-result rate; defaults to true if memory available <!-- k:RERANKER_ENABLED -->
 <!-- memory:end Config -->
 
 _Last auto-update: 2026-09-02 (session d166fd70)_

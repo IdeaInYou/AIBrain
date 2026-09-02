@@ -6,13 +6,13 @@ session: docs/memory/sessions/2026-09-02-d166fd70.md
 session_id: d166fd70-6b99-44b4-825c-71532589e642
 generated: true
 ---
-# AIBrain OAuth uses DCR (Dynamic Client Registration per RFC 7591) with static-bearer fallback for backward compatibility; state persists in oauth index across restarts and works on web, mobile, Desktop, and Claude Code via single token.
+# Session-scoped episodes deduplicate on source.session_id instead of never; repeat Stop hook fires in same session overwrites did/why/outcome/deferred/files and recomputes embeddings, returning action: 'updated' rather than duplicating.
 
 ## Context
 AIBrain v3 had static tokens in 6 locations, no git awareness, and reactive memory model; upgrade enables web/mobile OAuth, automatic session deduplication, proactive context injection before tool calls, and deterministic recovery from duplicates.
 
 ## Decision
-AIBrain OAuth uses DCR (Dynamic Client Registration per RFC 7591) with static-bearer fallback for backward compatibility; state persists in oauth index across restarts and works on web, mobile, Desktop, and Claude Code via single token.
+Session-scoped episodes deduplicate on source.session_id instead of never; repeat Stop hook fires in same session overwrites did/why/outcome/deferred/files and recomputes embeddings, returning action: 'updated' rather than duplicating.
 
 ## Consequences
 9 commits spanning 4,000+ lines of TypeScript, OpenSearch indices with hybrid search, ONNX embeddings cached locally, pre-tool recall confirmed working via PreToolUse additionalContext injection, OAuth validated live (17/17 tests: DCR, refresh, revoke working), all new features tested against production server and metrics show 0% false recalls, 76ms p50 latency.

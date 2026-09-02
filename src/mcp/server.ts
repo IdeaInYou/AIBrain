@@ -3,6 +3,7 @@ import { SERVER_NAME, SERVER_VERSION } from '../config.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
+import { registerContextum } from './tools/contextum.js';
 import { registerForget } from './tools/forget.js';
 import { registerRecall } from './tools/recall.js';
 import { registerRemember } from './tools/remember.js';
@@ -25,6 +26,7 @@ export function createMcpServer(): McpServer {
   registerRemember(server);
   registerUpdate(server);
   registerForget(server);
+  registerContextum(server);
 
   registerResources(server);
   registerPrompts(server);

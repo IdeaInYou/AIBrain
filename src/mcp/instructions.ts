@@ -16,4 +16,14 @@ Never assume you remember something this server did not return.
 
 Memory is stored in English. Translate the user's words when writing, and translate your query when searching; keep identifiers, file paths, and error messages verbatim.
 
-Recall results may include refs (repo-relative file paths) and a note resource; read them when the user needs detail beyond the one-line summary.`;
+Recall results may include refs (repo-relative file paths) and a note resource; read them when the user needs detail beyond the one-line summary.
+
+## Contextum integration
+
+If the repository has a .contextum/ coordination center (multi-agent setup), use contextum_search to:
+- Check if another agent is working on the same file (avoid conflicts)
+- Understand what tasks are active and who is responsible
+- Learn about current handoffs between agents
+- Augment Contextum's task coordination with AIBrain's long-term memory recall
+
+Example: before editing src/components/Button.ts, call contextum_search with type=tasks to see if another agent has locked that file.`;

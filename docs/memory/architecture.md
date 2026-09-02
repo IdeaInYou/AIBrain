@@ -26,6 +26,10 @@
 - Session end hook extracts episode and facts via claude -p, renders notes and ADRs, patches architecture.md, commits under flock <!-- k:claude-code/hooks/memory-stop.sh -->
 - PreToolUse hook on Edit/Write/MultiEdit; emits JSON additionalContext with file history via /api/file-context <!-- k:claude-code/hooks/memory-pretool.sh -->
 - PreToolUse hook on Bash, filtered to docker/traefik/deploy/migrate/opensearch; emits JSON additionalContext with relevant history <!-- k:claude-code/hooks/memory-pretool-bash.sh -->
+- Semantic reranking via bge-reranker-base (gated on >30% zero-result); composes with type-aware rerank <!-- k:src/core/rerank.ts -->
+- Daily/weekly memory summaries by project and date with fact/decision/todo highlights <!-- k:src/core/digest.ts -->
+- Auto-detection and merge of duplicates (cosine ≥0.95) via scheduled tasks with cascade supersede <!-- k:src/core/selfHealing.ts -->
+- Bulk memory import from NDJSON/CSV with automatic embedding and deduplication <!-- k:src/core/imports.ts -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -53,6 +57,7 @@
 - Stop hook now dedupes episodes on source.session_id instead of never deduping; repeat fires update one record <!-- k:Episode deduplication -->
 - Non-empty episode.deferred auto-creates type=todo; when deferred empties, todo status→done; session_id links them <!-- k:Deferred todo chain -->
 - Post-commit hook sends commit sha, message, files, stat to /api/ingest/commit; attaches to live episode or creates light one <!-- k:Git commit ingestion -->
+- Type-aware rerank → semantic rerank (bge-reranker-base if metrics show >30% zero-result) → top-K <!-- k:search-ranking -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -71,6 +76,7 @@
 - PreToolUse hook injects file context (earlier work on the file) via additionalContext JSON; Bash hook filters to ops (docker/traefik/deploy/migrat) <!-- k:Pre-tool recall -->
 - PKCE S256, DCR (clients self-register), password-protected consent, token rotation with refresh-token family revocation, 1h idle expiry for sessions <!-- k:OAuth 2.0 service -->
 - contextum_search tool queries .contextum/ coordination state; added via npm package with string matching on tasks, agents, locks <!-- k:Contextum MCP Bridge -->
+- contextum NPM package; MCP tool for querying .contextum/ coordination state (tasks, locks, agents) <!-- k:Contextum -->
 <!-- memory:end Integrations -->
 
 ## Infrastructure
@@ -79,6 +85,7 @@
 - Query metrics: recall count, zero-result %, latency p50/p95, pre-tool hit/miss, writes by source_kind. <!-- k:events index -->
 - Unknown session id now returns 404 (not 400) to signal re-initialize; idle expiry at 1h; prevents stream leaks <!-- k:MCP sessions -->
 - memories (with episode.commits, refs, note, related), projects, oauth (clients, codes, tokens, families), events (ts, kind, client, project, latency_ms, hits, top_score, cached) <!-- k:OpenSearch indices -->
+- OPENSEARCH_URL fixed to http://aibrain_opensearch:9200; Traefik labels production-ready <!-- k:docker-compose.yml -->
 <!-- memory:end Infrastructure -->
 
 ## Config

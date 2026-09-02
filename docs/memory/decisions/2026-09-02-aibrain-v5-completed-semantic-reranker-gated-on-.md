@@ -6,13 +6,13 @@ session: docs/memory/sessions/2026-09-02-d166fd70.md
 session_id: d166fd70-6b99-44b4-825c-71532589e642
 generated: true
 ---
-# AIBrain OAuth uses DCR (Dynamic Client Registration) and static-bearer fallback; state persists in oauth index across container restarts; validated end-to-end: 17/17 tests (register, authorize, token, refresh, revoke); works on web, mobile, Desktop, and Code.
+# AIBrain v5 completed: semantic reranker (gated on >30% zero-result, currently 0%), digest (daily/weekly summaries), self-healing (auto-merge cosine >0.95), imports (NDJSON/CSV with embedding).
 
 ## Context
 AIBrain v3 lacked OAuth for web/mobile, had static token across 6 locations, no git awareness, and no proactive context injection; v4/v5 upgrade enables multi-surface authentication, autonomous journaling, pre-tool memory access, and multi-agent coordination.
 
 ## Decision
-AIBrain OAuth uses DCR (Dynamic Client Registration) and static-bearer fallback; state persists in oauth index across container restarts; validated end-to-end: 17/17 tests (register, authorize, token, refresh, revoke); works on web, mobile, Desktop, and Code.
+AIBrain v5 completed: semantic reranker (gated on >30% zero-result, currently 0%), digest (daily/weekly summaries), self-healing (auto-merge cosine >0.95), imports (NDJSON/CSV with embedding).
 
 ## Consequences
 45 comprehensive tests passed on live server; OAuth 17/17 (DCR, consent, refresh, revoke); episodes deduplicate on session_id; deferred→todo chains work; file-context ranks by tier; metrics show 76 ms p50 latency, 0% false recalls; Contextum coordination bridge integrated; v5 features (reranker, digest, self-healing, imports) compiled and committed, ready to deploy.

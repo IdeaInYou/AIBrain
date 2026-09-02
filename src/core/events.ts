@@ -128,3 +128,16 @@ export async function stats(days: number): Promise<Stats> {
     summary_calls: a.summaries?.doc_count ?? 0,
   };
 }
+
+/** Quick check for whether semantic reranking should activate (zero_result_pct > threshold). */
+export async function getRecentStats(): Promise<{ zero_result_pct: number; total: number }> {
+  try {
+    const s = await stats(7); // Last 7 days
+    return {
+      zero_result_pct: s.recall.zero_result_pct,
+      total: s.recall.total,
+    };
+  } catch {
+    return { zero_result_pct: 0, total: 0 };
+  }
+}

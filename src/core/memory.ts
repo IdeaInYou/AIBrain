@@ -6,6 +6,8 @@ import { osRequest, statusOf } from '../search/client.js';
 import { contentHash } from '../search/dedupe.js';
 import { listMemories, searchMemories, type RawHit } from '../search/hybrid.js';
 import { rerank } from '../search/rerank.js';
+import { SemanticReranker } from '../search/semantic-rerank.js';
+import { getRecentStats } from './events.js';
 import { findEpisodeBySession } from './remember.js';
 import { recordEvent } from './events.js';
 import { hydrateRelated, linkPair, type SeeAlso } from './related.js';
@@ -83,7 +85,18 @@ export async function recall(input: RecallInput): Promise<RecalledHit[]> {
   const vector = await embedOne(input.query, 'query');
   // Over-fetch so the type-aware rerank has room to reorder before truncating.
   const raw = await searchMemories({ query: input.query, vector, filters, k: k * 3 });
-  const hits: RecalledHit[] = rerank(raw.map(toHit)).slice(0, k);
+  let hits: RecalledHit[] = rerank(raw.map(toHit)).slice(0, k);
+
+  // Optional semantic reranking if search quality is poor
+  if (config.SEMANTIC_RERANK_ENABLED && hits.length > 0) {
+    try {
+      const reranker = SemanticReranker.getInstance();
+      const semanticHits = await reranker.rerank(input.query, hits, { topK: k, timeout: 3000 });
+      hits = semanticHits as RecalledHit[];
+    } catch (err) {
+      logger.warn({ err }, 'semantic reranking failed, continuing with type-aware ranking');
+    }
+  }
 
   // Only the top few: see_also on every hit would swamp the context budget.
   const byId = new Map(raw.map(h => [h._id, h._source.related ?? []]));

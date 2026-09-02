@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - OPENSEARCH_URL=http://opensearch:9200
+      - OPENSEARCH_URL=http://aibrain_opensearch:9200
       - MODEL_CACHE_DIR=/models
     volumes:
       - model-cache:/models
@@ -46,10 +46,11 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=registry_default
-      - traefik.http.routers.memory.rule=Host(`memory.${MEMORY_DOMAIN:-example.com}`)
-      - traefik.http.routers.memory.entrypoints=websecure
-      - traefik.http.routers.memory.tls.certresolver=le
-      - traefik.http.services.memory.loadbalancer.server.port=3000
+      - traefik.http.routers.aibrain.rule=Host(`memory.ideainyou.com`)
+      - traefik.http.routers.aibrain.entrypoints=websecure
+      - traefik.http.routers.aibrain.tls.certresolver=myresolver
+      - traefik.http.services.aibrain.loadbalancer.server.port=3000
+      - traefik.http.routers.aibrain.middlewares=compress
 
 volumes:
   os-data: {}

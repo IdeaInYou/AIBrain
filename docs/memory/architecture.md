@@ -32,6 +32,10 @@
 - Bulk memory import from NDJSON/CSV with automatic embedding and deduplication <!-- k:src/core/imports.ts -->
 - Semantic reranking with bge-reranker-base model; RRF fusion of BM25 + kNN scores; activated on >30% zero-result <!-- k:src/core/reranker.ts -->
 - Auto-detect duplicates (cosine >0.95); merge + supersede without manual; background task <!-- k:src/core/selfHeal.ts -->
+- Semantic reranker with bge-reranker-base foundation, auto-activated when zero-result-pct >30%. <!-- k:src/http/routes/rerank.ts -->
+- Daily/weekly summary generation with highlights: top facts, decisions, todos, episodes by date and project. <!-- k:src/http/routes/digest.ts -->
+- Background task that finds duplicate records (cosine >0.95), merges them, and supersedes old versions without human intervention. <!-- k:src/http/routes/self-healing.ts -->
+- Bulk memory import from NDJSON or CSV with auto-embedding and deduplication. <!-- k:src/http/routes/import.ts -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -64,6 +68,7 @@
 - PreToolUse hook injects /api/file-context results as additionalContext JSON before tool calls; 240 chars/line, ≤4 lines per file <!-- k:pre-tool recall -->
 - post-commit hook ingests commits via /api/ingest/commit; attaches to live episode (same project/device, ≤2h) or creates lightweight episode <!-- k:git commits -->
 - Events index records recalls, writes, latency, cache hits; /api/stats emits zero-result%, p50/p95 latency, verdicts on search quality <!-- k:metrics -->
+- Before Edit/Write/MultiEdit/Bash calls, memory-pretool.sh injects up to 4 lines of related work as JSON additionalContext, verified working on production. <!-- k:PreToolUse hook → additionalContext injection -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -84,6 +89,7 @@
 - contextum_search tool queries .contextum/ coordination state; added via npm package with string matching on tasks, agents, locks <!-- k:Contextum MCP Bridge -->
 - contextum NPM package; MCP tool for querying .contextum/ coordination state (tasks, locks, agents) <!-- k:Contextum -->
 - DCR + static-bearer fallback; works on web, mobile, Desktop, Code; state in oauth index; PUBLIC_URL enables it <!-- k:OAuth 2.0 -->
+- contextum_search tool queries .contextum/ state (tasks, locks, agents) to enable multi-agent coordination and conflict avoidance. <!-- k:Contextum coordination center -->
 <!-- memory:end Integrations -->
 
 ## Infrastructure
@@ -92,7 +98,7 @@
 - Query metrics: recall count, zero-result %, latency p50/p95, pre-tool hit/miss, writes by source_kind. <!-- k:events index -->
 - Unknown session id now returns 404 (not 400) to signal re-initialize; idle expiry at 1h; prevents stream leaks <!-- k:MCP sessions -->
 - memories (with episode.commits, refs, note, related), projects, oauth (clients, codes, tokens, families), events (ts, kind, client, project, latency_ms, hits, top_score, cached) <!-- k:OpenSearch indices -->
-- Fixed OPENSEARCH_URL from 'http://opensearch' to 'http://aibrain_opensearch'; updated Traefik labels to current syntax <!-- k:docker-compose.yml -->
+- Fixed OPENSEARCH_URL from http://opensearch:9200 to http://aibrain_opensearch:9200; updated Traefik labels for production routing. <!-- k:docker-compose.yml -->
 <!-- memory:end Infrastructure -->
 
 ## Config
@@ -104,6 +110,7 @@
 - Enable metrics collection (default true); /api/stats returns 503 if disabled <!-- k:METRICS_ENABLED -->
 - true (default): memory_forget removes documents outright; false: reverts to soft delete (status=deleted, recoverable) <!-- k:FORGET_HARD_DELETE -->
 - Auto-activates if metrics show >30% zero-result rate; defaults to true if memory available <!-- k:RERANKER_ENABLED -->
+- New env vars for semantic reranking (off by default, trigger at >30% zero-result), digest cadence, and bulk import parallelism. <!-- k:RERANKER_ENABLED, DIGEST_SCHEDULE, IMPORT_BATCH_SIZE -->
 <!-- memory:end Config -->
 
 _Last auto-update: 2026-09-02 (session d166fd70)_

@@ -53,6 +53,18 @@ const Schema = z.object({
     .transform(v => v !== 'false' && v !== '0'),
 
   /**
+   * Semantic reranking via bge-reranker-base (350 MB). Activated automatically
+   * when zero_result_pct > 30%, indicating search is missing relevant data.
+   * Can be forced on with this env var regardless of metrics.
+   */
+  SEMANTIC_RERANK_ENABLED: z
+    .string()
+    .optional()
+    .transform(v => v === 'true' || v === '1'),
+  /** Minimum zero-result % before semantic reranker activates (if METRICS_ENABLED). */
+  SEMANTIC_RERANK_THRESHOLD: z.coerce.number().min(0).max(100).default(30),
+
+  /**
    * External origin, e.g. https://memory.example.com. OAuth is enabled only when
    * this is set: every discovery document has to advertise absolute URLs, and
    * guessing them from the request Host header is spoofable.

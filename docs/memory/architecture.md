@@ -22,6 +22,10 @@
 - Discovery docs, /register DCR, /authorize consent, /token code↔bearer, /revoke family-revocation <!-- k:src/http/routes/oauth.ts -->
 - Added fields: refs (keyword, ADR paths), related (keyword, bidirectional link ids), note (text, index:false), episode.commits (object with sha/message) <!-- k:memories mapping -->
 - Contextum bridge: contextum_search tool queries .contextum/agents, .contextum/coord/tasks.json, .contextum/context.yaml for coordination state <!-- k:src/core/contextum.ts -->
+- New tool that queries coordination center state by root path and type (tasks, agents, status, search) <!-- k:src/mcp/tools/contextum.ts -->
+- Session end hook extracts episode and facts via claude -p, renders notes and ADRs, patches architecture.md, commits under flock <!-- k:claude-code/hooks/memory-stop.sh -->
+- PreToolUse hook on Edit/Write/MultiEdit; emits JSON additionalContext with file history via /api/file-context <!-- k:claude-code/hooks/memory-pretool.sh -->
+- PreToolUse hook on Bash, filtered to docker/traefik/deploy/migrate/opensearch; emits JSON additionalContext with relevant history <!-- k:claude-code/hooks/memory-pretool-bash.sh -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -46,6 +50,9 @@
 - PreToolUse hook injects file history via additionalContext JSON; Edit/Write/MultiEdit tools get 4 lines of related episodes; Bash hook fires on deploy/docker/traefik/migrate patterns <!-- k:Pre-tool recall -->
 - Stop hook runs claude -p extraction, creates session note with did/why/outcome/deferred/files, commits to docs/memory/sessions/{id}.md via git post-commit hook <!-- k:Session journaling -->
 - On every write: kNN across all types in project, cosine ≥0.75, top-5 auto-linked bidirectionally via scripted bulk update; recall returns see_also (top-3, deduped) <!-- k:Related links -->
+- Stop hook now dedupes episodes on source.session_id instead of never deduping; repeat fires update one record <!-- k:Episode deduplication -->
+- Non-empty episode.deferred auto-creates type=todo; when deferred empties, todo status→done; session_id links them <!-- k:Deferred todo chain -->
+- Post-commit hook sends commit sha, message, files, stat to /api/ingest/commit; attaches to live episode or creates light one <!-- k:Git commit ingestion -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -63,6 +70,7 @@
 - Git hook at repo level ingests commits to /api/ingest/commit; attaches to live episode if project+device match within 2h, or creates light episode <!-- k:Post-commit hook -->
 - PreToolUse hook injects file context (earlier work on the file) via additionalContext JSON; Bash hook filters to ops (docker/traefik/deploy/migrat) <!-- k:Pre-tool recall -->
 - PKCE S256, DCR (clients self-register), password-protected consent, token rotation with refresh-token family revocation, 1h idle expiry for sessions <!-- k:OAuth 2.0 service -->
+- contextum_search tool queries .contextum/ coordination state; added via npm package with string matching on tasks, agents, locks <!-- k:Contextum MCP Bridge -->
 <!-- memory:end Integrations -->
 
 ## Infrastructure

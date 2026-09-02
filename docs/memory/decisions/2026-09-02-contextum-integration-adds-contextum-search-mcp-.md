@@ -6,13 +6,13 @@ session: docs/memory/sessions/2026-09-02-d166fd70.md
 session_id: d166fd70-6b99-44b4-825c-71532589e642
 generated: true
 ---
-# AIBrain OAuth uses DCR (Dynamic Client Registration) and static-bearer token fallback; OAuth state persists in the oauth index across restarts; works on claude.ai, Desktop, mobile, and Code via Connectors + mcp-remote bridge without manual setup.
+# Contextum integration adds contextum_search MCP tool to query .contextum/ coordination state (tasks, locks, agents) from within AIBrain, enabling agents to check file locks and understand multi-agent state before editing.
 
 ## Context
 v3 lacked OAuth for web/mobile surfaces, had manual episode deduplication, no git-aware journaling, no proactive context recall, and no coordination between multi-agent systems. Contextum integration emerged from user's two projects in Downloads folder revealing parallel coordination needs.
 
 ## Decision
-AIBrain OAuth uses DCR (Dynamic Client Registration) and static-bearer token fallback; OAuth state persists in the oauth index across restarts; works on claude.ai, Desktop, mobile, and Code via Connectors + mcp-remote bridge without manual setup.
+Contextum integration adds contextum_search MCP tool to query .contextum/ coordination state (tasks, locks, agents) from within AIBrain, enabling agents to check file locks and understand multi-agent state before editing.
 
 ## Consequences
 All features verified live: OAuth 17/17, episodes dedupe on session_id, pre-tool recall fires correctly, related links work bidirectionally, metrics show 76ms p50 latency and 0% false recalls, git commits attach to episodes, and contextum_search tool is callable by agents to avoid conflicts in multi-agent work.

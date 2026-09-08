@@ -36,6 +36,8 @@
 - Daily/weekly summary generation with highlights: top facts, decisions, todos, episodes by date and project. <!-- k:src/http/routes/digest.ts -->
 - Background task that finds duplicate records (cosine >0.95), merges them, and supersedes old versions without human intervention. <!-- k:src/http/routes/self-healing.ts -->
 - Bulk memory import from NDJSON or CSV with auto-embedding and deduplication. <!-- k:src/http/routes/import.ts -->
+- SemanticReranker singleton with metric-gated bge-reranker-base activation (triggers when zero_result_pct > 30%) <!-- k:src/search/semantic-rerank.ts -->
+- Background task for automatic duplicate detection (cosine >0.95) and merge via supersede closure <!-- k:src/core/self-healing.ts -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -69,6 +71,7 @@
 - post-commit hook ingests commits via /api/ingest/commit; attaches to live episode (same project/device, ≤2h) or creates lightweight episode <!-- k:git commits -->
 - Events index records recalls, writes, latency, cache hits; /api/stats emits zero-result%, p50/p95 latency, verdicts on search quality <!-- k:metrics -->
 - Before Edit/Write/MultiEdit/Bash calls, memory-pretool.sh injects up to 4 lines of related work as JSON additionalContext, verified working on production. <!-- k:PreToolUse hook → additionalContext injection -->
+- recall() chains type-aware rerank followed by optional semantic rerank (applies only if metric threshold met) <!-- k:Search pipeline -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -98,7 +101,7 @@
 - Query metrics: recall count, zero-result %, latency p50/p95, pre-tool hit/miss, writes by source_kind. <!-- k:events index -->
 - Unknown session id now returns 404 (not 400) to signal re-initialize; idle expiry at 1h; prevents stream leaks <!-- k:MCP sessions -->
 - memories (with episode.commits, refs, note, related), projects, oauth (clients, codes, tokens, families), events (ts, kind, client, project, latency_ms, hits, top_score, cached) <!-- k:OpenSearch indices -->
-- Fixed OPENSEARCH_URL from http://opensearch:9200 to http://aibrain_opensearch:9200; updated Traefik labels for production routing. <!-- k:docker-compose.yml -->
+- Service name corrected to aibrain_opensearch, OPENSEARCH_URL fixed to match, Traefik host updated to memory.ideainyou.com <!-- k:docker-compose.yml -->
 <!-- memory:end Infrastructure -->
 
 ## Config
@@ -111,6 +114,8 @@
 - true (default): memory_forget removes documents outright; false: reverts to soft delete (status=deleted, recoverable) <!-- k:FORGET_HARD_DELETE -->
 - Auto-activates if metrics show >30% zero-result rate; defaults to true if memory available <!-- k:RERANKER_ENABLED -->
 - New env vars for semantic reranking (off by default, trigger at >30% zero-result), digest cadence, and bulk import parallelism. <!-- k:RERANKER_ENABLED, DIGEST_SCHEDULE, IMPORT_BATCH_SIZE -->
+- Boolean flag (default true) controlling whether bge-reranker-base model loads on startup <!-- k:SEMANTIC_RERANK_ENABLED -->
+- Zero-result percentage threshold (default 30) that triggers reranker activation in production <!-- k:SEMANTIC_RERANK_THRESHOLD -->
 <!-- memory:end Config -->
 
-_Last auto-update: 2026-09-02 (session d166fd70)_
+_Last auto-update: 2026-09-08 (session c78a9a38)_

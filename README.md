@@ -247,7 +247,7 @@ The server is named `memory`, so tools render as `memory_*` and the prefix docum
 | `memory_recall` | Search. Query must be in English — the tool tells Claude to translate. Supports `since`/`until`. |
 | `memory_remember` | Write. `content` in English; `type=episode` takes a structured `episode` object; `refs`/`note` link repo files. |
 | `memory_update` | Amend by id; `status: "done"` closes a todo. The new version is `locked`: automatic dedupe and `merge-duplicates` never supersede it. |
-| `memory_forget` | **Permanent** delete by id or filter — no undo. |
+| `memory_forget` | **Permanent** delete by id or filter — no undo. By id it also removes the record's earlier versions (its `superseded_by` chain); by filter it matches every status, so superseded copies and closed todos go too. |
 
 Every description is capped at 400 characters, enforced by a test.
 
@@ -396,6 +396,7 @@ Bearer token or OAuth access token on everything except `/health` and the OAuth 
 | `GET` | `/api/recall?q=&type=&k=&min_sim=` | search for the Bash hook; `min_sim` drops hits whose raw query↔record cosine is below it (hybrid scores are normalised per query, so they cannot say "nothing relevant") |
 | `GET` | `/api/projects` | project list with `last_activity` |
 | `PUT` | `/api/projects/:slug` | `{name?, aliases?, repo_names?, brief?}` — teach it your git remotes; `brief` (≤ 1500 chars) heads that project's summary |
+| `DELETE` | `/api/projects/:slug` | remove an empty project from the registry; 409 while any memory still carries the slug |
 | `GET` | `/api/stats?days=` | usage metrics and warnings |
 | `GET` | `/api/digest?period=daily\|weekly&project=&format=md\|json` | rolling 24 h / 7 d window by `occurred_at` |
 | `POST` | `/api/imports` | `{records: [...]}` or an NDJSON body, ≤ 500 records; each goes through `remember()` (dedupe, links, deferred→todo) |

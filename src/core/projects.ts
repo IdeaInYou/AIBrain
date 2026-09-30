@@ -100,6 +100,25 @@ export async function patchProject(slug: string, patch: ProjectPatch): Promise<P
 }
 
 /**
+ * Removes a project from the registry. Refuses while any memory, in any status,
+ * still carries the slug: the registry entry is what makes those findable by
+ * project, so deleting it first would orphan them.
+ */
+export async function deleteProject(slug: string): Promise<{ deleted: boolean; remaining: number }> {
+  const { count } = await osRequest<{ count: number }>('POST', `/${INDEX.memories}/_count`, {
+    query: { term: { project: slug } },
+  });
+  if (count > 0) return { deleted: false, remaining: count };
+  try {
+    await osRequest('DELETE', `/${INDEX.projects}/_doc/${encodeURIComponent(slug)}`, undefined, { refresh: 'wait_for' });
+    return { deleted: true, remaining: 0 };
+  } catch (err) {
+    if (statusOf(err) === 404) return { deleted: false, remaining: 0 };
+    throw err;
+  }
+}
+
+/**
  * Resolve a git remote URL or directory name to a known slug. Pure string
  * matching against the registry — the hook calls this, so it must not need a model.
  */

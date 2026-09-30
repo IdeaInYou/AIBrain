@@ -9,13 +9,14 @@ import { rerank } from '../search/rerank.js';
 import { findEpisodeBySession } from './remember.js';
 import { recordEvent } from './events.js';
 import { hydrateRelated, linkPair, type SeeAlso } from './related.js';
-import type {
-  MemoryDoc,
-  MemoryFilters,
-  MemoryHit,
-  MemoryStatus,
-  MemoryType,
-  RememberResult,
+import {
+  MEMORY_STATUSES,
+  type MemoryDoc,
+  type MemoryFilters,
+  type MemoryHit,
+  type MemoryStatus,
+  type MemoryType,
+  type RememberResult,
 } from '../types.js';
 
 /** Accepts an ISO timestamp or a relative shorthand: `30d`, `12h`, `4w`, `6m`. */
@@ -298,14 +299,35 @@ export interface ForgetInput {
   reason?: string;
 }
 
-/** Builds the query clauses shared by bulk forget. */
-function forgetFilter(f: NonNullable<ForgetInput['filter']>): unknown[] {
-  const filter: unknown[] = [{ terms: { status: ['active'] } }];
+/**
+ * Builds the query clauses shared by bulk forget. A hard delete covers every
+ * status: "forget X" must not leave X's superseded versions, closed todos or
+ * earlier soft-deleted copies behind.
+ */
+function forgetFilter(f: NonNullable<ForgetInput['filter']>, hard: boolean): unknown[] {
+  const filter: unknown[] = [{ terms: { status: hard ? [...MEMORY_STATUSES] : ['active'] } }];
   if (f.project) filter.push({ term: { project: f.project } });
   if (f.type?.length) filter.push({ terms: { type: f.type } });
   if (f.tags?.length) filter.push({ terms: { tags: f.tags } });
   if (f.before) filter.push({ range: { occurred_at: { lt: parseSince(f.before) } } });
   return filter;
+}
+
+/** Every record that was superseded, directly or through a chain, by `id`. */
+async function predecessors(id: string): Promise<string[]> {
+  const found: string[] = [];
+  let frontier = [id];
+  // Bounded: a chain longer than this is not a realistic edit history.
+  for (let depth = 0; depth < 20 && frontier.length; depth++) {
+    const res = await osRequest<{ hits: { hits: { _id: string }[] } }>('POST', `/${INDEX.memories}/_search`, {
+      size: 1000,
+      _source: false,
+      query: { terms: { superseded_by: frontier } },
+    });
+    frontier = res.hits.hits.map(h => h._id).filter(x => !found.includes(x) && x !== id);
+    found.push(...frontier);
+  }
+  return found;
 }
 
 /**
@@ -348,13 +370,17 @@ export async function forget(input: ForgetInput): Promise<{ deleted: number; har
 
   if (input.id) {
     if (hard) {
-      await purgeBacklinks([input.id]);
-      try {
-        await osRequest('DELETE', `/${INDEX.memories}/_doc/${input.id}`, undefined, { refresh: 'wait_for' });
-      } catch (err) {
-        if (statusOf(err) === 404) return { deleted: 0, hard };
-        throw err;
-      }
+      // The record's earlier versions say the same thing — they go with it.
+      const ids = [input.id, ...(await predecessors(input.id))];
+      await purgeBacklinks(ids);
+      const res = await osRequest<{ deleted: number }>(
+        'POST',
+        `/${INDEX.memories}/_delete_by_query`,
+        { query: { ids: { values: ids } } },
+        { refresh: 'true', conflicts: 'proceed' },
+      );
+      logger.info({ id: input.id, deleted: res.deleted, hard, reason: input.reason }, 'forget: single');
+      return { deleted: res.deleted, hard };
     } else {
       await osRequest(
         'POST',
@@ -371,7 +397,7 @@ export async function forget(input: ForgetInput): Promise<{ deleted: number; har
     throw new Error('forget requires either an id or a non-empty filter');
   }
 
-  const filter = forgetFilter(input.filter);
+  const filter = forgetFilter(input.filter, hard);
 
   if (!hard) {
     const res = await osRequest<{ updated: number }>(

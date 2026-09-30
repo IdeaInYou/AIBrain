@@ -27,21 +27,23 @@
 - PreToolUse hook on Edit/Write/MultiEdit; emits JSON additionalContext with file history via /api/file-context <!-- k:claude-code/hooks/memory-pretool.sh -->
 - PreToolUse hook on Bash, filtered to docker/traefik/deploy/migrate/opensearch; emits JSON additionalContext with relevant history <!-- k:claude-code/hooks/memory-pretool-bash.sh -->
 - Semantic reranking via bge-reranker-base (gated on >30% zero-result); composes with type-aware rerank <!-- k:src/core/rerank.ts -->
-- Rolling windows now computed from occurred_at instead of write time; errors no longer swallowed into empty results; entries no longer truncated <!-- k:src/core/digest.ts -->
+- Digest window now computed from occurred_at (rolling 24h/7d), errors no longer swallowed as empty results <!-- k:src/core/digest.ts -->
 - Auto-detection and merge of duplicates (cosine ≥0.95) via scheduled tasks with cascade supersede <!-- k:src/core/selfHealing.ts -->
-- Rewritten to go through the normal remember() path for correct embeddings, dedupe, related-links, and deferred-to-todo conversion; broken CSV parser removed <!-- k:src/core/imports.ts -->
+- Rewritten to go through the normal remember() pipeline (correct embedding prefix, dedup, related-links, deferred→todo) instead of a separate broken path <!-- k:src/core/imports.ts -->
 - Semantic reranking with bge-reranker-base model; RRF fusion of BM25 + kNN scores; activated on >30% zero-result <!-- k:src/core/reranker.ts -->
 - Auto-detect duplicates (cosine >0.95); merge + supersede without manual; background task <!-- k:src/core/selfHeal.ts -->
 - Semantic reranker with bge-reranker-base foundation, auto-activated when zero-result-pct >30%. <!-- k:src/http/routes/rerank.ts -->
 - Daily/weekly summary generation with highlights: top facts, decisions, todos, episodes by date and project. <!-- k:src/http/routes/digest.ts -->
 - Background task that finds duplicate records (cosine >0.95), merges them, and supersedes old versions without human intervention. <!-- k:src/http/routes/self-healing.ts -->
 - Bulk memory import from NDJSON or CSV with auto-embedding and deduplication. <!-- k:src/http/routes/import.ts -->
-- Replaced with POST /api/maintenance/merge-duplicates, dry-run by default, cosine 0.95 threshold, same project/type only, episodes excluded, preserves refs/tags/importance onto the newer record <!-- k:src/core/self-healing.ts -->
+- Replaced automatic nightly merge with POST /api/maintenance/merge-duplicates: dry-run by default, cosine 0.95 threshold, same project/type only, episodes excluded, apply:true required to change data <!-- k:src/core/self-healing.ts -->
 - memory_remember now checks for near-duplicate/subsumed records before writing and returns a `similar` field so the caller can choose to update instead of creating a new record <!-- k:remember.ts -->
 - Stop hook extraction prompt rewritten to scrub hook-inserted memory from the transcript, avoid re-recording already-saved memories, forbid fabricated numbers, and capture dead ends separately <!-- k:memory-extract.sh -->
 - Server now generates and stores a short per-project brief, updated by the Stop hook only on material change, surfaced at session start <!-- k:project briefs -->
 - New npm run eval command runs a 22-query recall benchmark reporting hit@1, hit@3, and MRR <!-- k:eval harness -->
 - Server-side per-project brief updated by the Stop hook only on significant change, merged into remember() and shown at SessionStart <!-- k:Project briefs -->
+- Per-project brief maintained by the Stop hook, surfaced at SessionStart alongside recent episodes and todos <!-- k:project brief -->
+- npm run eval: 22-query recall quality benchmark (hit@1, hit@3, MRR) runnable against production <!-- k:eval script -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -119,7 +121,7 @@
 - New env vars for semantic reranking (off by default, trigger at >30% zero-result), digest cadence, and bulk import parallelism. <!-- k:RERANKER_ENABLED, DIGEST_SCHEDULE, IMPORT_BATCH_SIZE -->
 - Boolean flag (default true) controlling whether bge-reranker-base model loads on startup <!-- k:SEMANTIC_RERANK_ENABLED -->
 - Zero-result percentage threshold (default 30) that triggers reranker activation in production <!-- k:SEMANTIC_RERANK_THRESHOLD -->
-- PreToolUse hooks are now actually registered in settings.json; previously the install script omitted this so they never fired <!-- k:PreToolUse hooks -->
+- Registered in settings.json (install script previously omitted them, so they never fired); prior config backed up to ~/.claude/settings.json.bak-2026-09-30 <!-- k:PreToolUse hooks -->
 - New 0.85 cosine threshold controlling when a new todo is merged into an existing open todo instead of created separately <!-- k:TODO_MERGE_THRESHOLD -->
 <!-- memory:end Config -->
 

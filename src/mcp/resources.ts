@@ -85,40 +85,4 @@ export function registerResources(server: McpServer): void {
       return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] };
     },
   );
-
-  // Contextum coordination center status (for multi-agent repos)
-  server.registerResource(
-    'contextum-status',
-    new ResourceTemplate('memory://contextum/{root}/status', { list: undefined }),
-    {
-      title: 'Contextum coordination status',
-      description: 'Shows if .contextum/ coordination center exists and what state is active.',
-      mimeType: 'application/json',
-    },
-    async (uri, { root }) => {
-      const { ContextumBridge } = await import('../mcp/tools/contextum.js');
-      const bridge = new ContextumBridge({ root: String(root) });
-      const status = await bridge.getStatus();
-      return {
-        contents: [
-          {
-            uri: uri.href,
-            mimeType: 'application/json',
-            text: JSON.stringify(
-              {
-                contextum_initialized: status.initialized,
-                has_agents: status.hasAgents,
-                has_context: status.hasContext,
-                message: status.initialized
-                  ? 'Multi-agent coordination center found — use contextum_search to check locks and tasks'
-                  : 'No Contextum coordination center in this repository',
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    },
-  );
 }

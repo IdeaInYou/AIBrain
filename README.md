@@ -389,13 +389,13 @@ Bearer token or OAuth access token on everything except `/health` and the OAuth 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST\|GET\|DELETE` | `/mcp` | Streamable HTTP MCP transport |
-| `POST` | `/api/ingest` | `{episode?, facts?, project?, refs?, note?, source?}` from the `Stop` hook |
+| `POST` | `/api/ingest` | `{episode?, facts?, project?, refs?, note?, project_brief?, source?}` from the `Stop` hook; a non-empty `project_brief` replaces the project's brief |
 | `POST` | `/api/ingest/commit` | git `post-commit`; attaches to an episode or creates one |
 | `GET` | `/api/summary?project=&days=` | same text as `memory_summary`, as markdown, for `SessionStart` |
 | `GET` | `/api/file-context?path=&k=` | file history for the pre-tool hook |
 | `GET` | `/api/recall?q=&type=&k=` | search for the Bash hook |
 | `GET` | `/api/projects` | project list with `last_activity` |
-| `PUT` | `/api/projects/:slug` | `{name?, aliases?, repo_names?}` — teach it your git remotes |
+| `PUT` | `/api/projects/:slug` | `{name?, aliases?, repo_names?, brief?}` — teach it your git remotes; `brief` (≤ 1500 chars) heads that project's summary |
 | `GET` | `/api/stats?days=` | usage metrics and warnings |
 | `GET` | `/api/digest?period=daily\|weekly&project=&format=md\|json` | rolling 24 h / 7 d window by `occurred_at` |
 | `POST` | `/api/imports` | `{records: [...]}` or an NDJSON body, ≤ 500 records; each goes through `remember()` (dedupe, links, deferred→todo) |
@@ -428,7 +428,9 @@ Three things that are easy to break and hard to notice:
 
 - **Recursion.** `claude -p` inside the `Stop` hook starts a session that fires the same hook. The child runs with `MEMORY_HOOK_RUNNING=1` and exits immediately.
 - **Hooks never fail a session.** Every path ends in `exit 0`; `curl` has `--max-time`, `claude -p` has `timeout 120`.
-- **Extraction runs detached** — the hook returns immediately and logs to `~/.claude/memory-extract.log`.
+- **Extraction runs detached** — the hook returns immediately and logs to `~/.claude/memory-extract.log`. It runs with `--no-session-persistence`, so extraction sessions never show up in `/resume`.
+- **The transcript is data.** System reminders, slash-command wrappers and meta entries are stripped, and the rest is wrapped in `<transcript>` so the model summarizes it instead of answering it. The current project brief is passed in; the model returns a rewritten one only when something durable changed.
+- **Model.** `MEMORY_EXTRACT_MODEL` defaults to `sonnet`: on the same transcript Haiku ignored the brief format and invented figures, Sonnet did not.
 
 Sessions with under 400 characters of prose are not journaled.
 
@@ -478,6 +480,8 @@ Hard limits in code (`config.ts` → `LIMITS`): `content` ≤ 2000 characters, `
 **Logs**: pino JSON. Memory content is redacted at `info` — only ids and counters.
 
 **Tests**: `npm test`. Covers dedupe normalization, rerank curves, summary formatting, the OAuth PKCE and redirect rules, `related` selection, the OpenSearch HEAD-404 contract, and a snapshot of every tool description so a reworded description is a deliberate diff.
+
+**Recall quality**: `MEMORY_URL=… MEMORY_TOKEN=… npm run eval` runs the paraphrased questions in `eval/recall-cases.json` against the live server and prints hit@1/3/5 and MRR@10. Run it before and after any change to search, ranking or thresholds. Baseline on 2026-09-30: hit@1 82%, hit@3 100%, MRR 0.902 over 22 cases.
 
 **Watching whether it works**: `GET /api/stats?days=7`. The number that matters most is `zero_result_pct` — above 30% means recall is failing, and the cause is usually query wording or missing data rather than ranking.
 

@@ -88,3 +88,61 @@ export async function findNearDuplicate(
   }
   return best;
 }
+
+export interface Neighbor {
+  id: string;
+  content: string;
+  embedding?: number[];
+}
+
+export interface WritePlan {
+  /** contained: the new text is already inside a stored record — touch that one, write nothing. */
+  action: 'new' | 'supersede' | 'contained';
+  target?: { id: string; similarity: number };
+  /** Close but below the merge bar — returned so the calling model can decide. */
+  similar: { id: string; content: string; similarity: number }[];
+}
+
+/** Shorter than this, "contained in" is coincidence rather than restatement. */
+const MIN_CONTAINED_CHARS = 20;
+const MAX_SIMILAR = 3;
+
+/**
+ * Where a new fact sits relative to its nearest stored neighbours (same project
+ * and type). Substring checks catch what cosine misses: a restatement that
+ * drops or adds a clause scores well below the dedupe bar yet says nothing new.
+ */
+export function planWrite(
+  content: string,
+  vector: number[],
+  neighbors: Neighbor[],
+  dedupeThreshold: number,
+  relatedThreshold: number,
+): WritePlan {
+  const mine = normalizeContent(content);
+  const scored = neighbors
+    .filter(n => Array.isArray(n.embedding) && n.embedding.length > 0)
+    .map(n => ({ ...n, similarity: cosine(vector, n.embedding!), norm: normalizeContent(n.content) }))
+    .sort((a, b) => b.similarity - a.similarity);
+
+  let plan: Omit<WritePlan, 'similar'> = { action: 'new' };
+  for (const n of scored) {
+    if (n.similarity < relatedThreshold) break;
+    const target = { id: n.id, similarity: n.similarity };
+    if (mine.length >= MIN_CONTAINED_CHARS && n.norm.includes(mine)) {
+      plan = { action: 'contained', target };
+      break;
+    }
+    if (n.similarity >= dedupeThreshold || (n.norm.length >= MIN_CONTAINED_CHARS && mine.includes(n.norm))) {
+      plan = { action: 'supersede', target };
+      break;
+    }
+  }
+
+  const similar = scored
+    .filter(n => n.similarity >= relatedThreshold && n.id !== plan.target?.id)
+    .slice(0, MAX_SIMILAR)
+    .map(n => ({ id: n.id, content: n.content, similarity: Number(n.similarity.toFixed(4)) }));
+
+  return { ...plan, similar };
+}

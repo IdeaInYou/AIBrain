@@ -5,7 +5,7 @@
 
 MEMORY_URL="${MEMORY_URL:-}"
 MEMORY_TOKEN="${MEMORY_TOKEN:-}"
-MEMORY_EXTRACT_MODEL="${MEMORY_EXTRACT_MODEL:-haiku}"
+MEMORY_EXTRACT_MODEL="${MEMORY_EXTRACT_MODEL:-sonnet}"
 DEVICE="$(hostname -s 2>/dev/null || echo unknown)"
 
 # Every hook exits 0, so a missing config must be a quiet no-op, not a failure.

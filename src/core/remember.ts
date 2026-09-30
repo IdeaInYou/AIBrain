@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { INDEX, LIMITS, config } from '../config.js';
 import { embedOne } from '../embed/embedder.js';
 import { logger } from '../logger.js';
-import { contentHash, cosine, findByHash, findNearDuplicate } from '../search/dedupe.js';
+import { contentHash, cosine, findByHash, findNearDuplicate, planWrite } from '../search/dedupe.js';
 import { knnSearch } from '../search/hybrid.js';
 import { osRequest } from '../search/client.js';
 import {
@@ -225,6 +225,10 @@ async function syncDeferredTodo(args: {
     return;
   }
 
+  // The same open item restated by a later session: replace the older todo
+  // rather than stacking a near-copy next to it.
+  const twin = await findNearDuplicate(embedding, 'todo', args.project, config.TODO_MERGE_THRESHOLD);
+
   const id = randomUUID();
   const timestamp = nowIso();
   await writeDoc(id, {
@@ -246,6 +250,14 @@ async function syncDeferredTodo(args: {
     created_at: timestamp,
     content_hash: contentHash(deferred),
   });
+  if (twin) {
+    await supersede(twin.id, id);
+    logger.info(
+      { id, superseded: twin.id, cosine: Number(twin.similarity.toFixed(4)), project: args.project },
+      'deferred todo replaced an open todo from an earlier session',
+    );
+    return;
+  }
   logger.info({ id, session_id: args.sessionId, project: args.project }, 'deferred todo created');
 }
 
@@ -331,7 +343,38 @@ export async function remember(input: RememberInput): Promise<RememberResult> {
   }
 
   const embedding = await embedOne(content, 'passage');
-  const duplicate = deduped ? await findNearDuplicate(embedding, input.type, project) : null;
+  const neighbors = deduped ? await knnSearch(embedding, { project: [project], type: [input.type] }, 5) : [];
+  const plan = deduped
+    ? planWrite(
+        content,
+        embedding,
+        neighbors.map(h => ({ id: h._id, content: h._source.content, embedding: h._source.embedding })),
+        config.DEDUPE_THRESHOLD,
+        config.RELATED_THRESHOLD,
+      )
+    : null;
+  const similar = plan?.similar.length ? { similar: plan.similar } : {};
+
+  if (plan?.action === 'contained' && plan.target) {
+    // Adds nothing the stored record does not already say — keep that one.
+    const target = neighbors.find(h => h._id === plan.target!.id)?._source;
+    await osRequest(
+      'POST',
+      `/${INDEX.memories}/_update/${plan.target.id}`,
+      {
+        doc: {
+          tags: [...new Set([...(target?.tags ?? []), ...(input.tags ?? [])])],
+          importance: Math.max(target?.importance ?? 3, input.importance ?? 3),
+          refs: normalizeRefs([...(target?.refs ?? []), ...(input.refs ?? [])]),
+        },
+      },
+      { refresh: 'wait_for' },
+    );
+    await touchProject(project, timestamp);
+    logger.info({ id: plan.target.id, project, type: input.type }, 'remember: contained in existing');
+    return { id: plan.target.id, action: 'updated', project, superseded: [], ...similar };
+  }
+  const duplicate = plan?.action === 'supersede' ? plan.target : null;
 
   const id = randomUUID();
   const doc: MemoryDoc = {
@@ -375,10 +418,10 @@ export async function remember(input: RememberInput): Promise<RememberResult> {
       { id, superseded: duplicate.id, similarity: Number(duplicate.similarity.toFixed(4)), project },
       'remember: merged',
     );
-    return { id, action: 'merged', project, superseded: [duplicate.id] };
+    return { id, action: 'merged', project, superseded: [duplicate.id], ...similar };
   }
 
   logger.info({ id, project, type: input.type }, 'remember: created');
   recordEvent({ kind: 'remember', project, source_kind: doc.source.kind, client: doc.source.client });
-  return { id, action: 'created', project, superseded: [] };
+  return { id, action: 'created', project, superseded: [], ...similar };
 }

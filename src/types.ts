@@ -79,6 +79,9 @@ export interface ProjectDoc {
   repo_names: string[];
   aliases: string[];
   last_activity: string;
+  /** Standing context for the project, rewritten by the Stop hook when something durable changes. */
+  brief?: string | null;
+  brief_updated_at?: string | null;
 }
 
 export interface MemoryFilters {
@@ -100,6 +103,8 @@ export interface RememberResult {
   action: RememberAction;
   project: string;
   superseded: string[];
+  /** Near but below the merge bar — the caller may want memory_update on one of these instead. */
+  similar?: { id: string; content: string; similarity: number }[];
 }
 
 export interface FactTally {

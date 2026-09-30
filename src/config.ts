@@ -46,6 +46,12 @@ const Schema = z.object({
    * longer decision sentence dilutes cosine, so 0.8 never fires in practice.
    */
   TODO_DECISION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.75),
+  /**
+   * Cosine at which a new deferred todo replaces an open todo from an earlier
+   * session. Measured on 73 live todos: restatements of the same open item
+   * scored 0.83–0.87, distinct items sharing a subsystem mostly below 0.85.
+   */
+  TODO_MERGE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
   /** Metrics are cheap but not free; turn off if the write volume ever matters. */
   METRICS_ENABLED: z
     .string()
@@ -127,4 +133,6 @@ export const LIMITS = {
   ingestFacts: 500,
   /** Sessions shorter than this are not worth a journal entry. */
   minEpisodeChars: 40,
+  /** Project brief — shown at every SessionStart, so it has to stay short. */
+  briefChars: 1500,
 } as const;

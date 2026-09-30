@@ -1,11 +1,13 @@
 import type { Hono } from 'hono';
 import * as z from 'zod';
+import { LIMITS } from '../../config.js';
 import { listProjects, patchProject, slugify } from '../../core/projects.js';
 
 const PatchSchema = z.object({
   name: z.string().optional(),
   aliases: z.array(z.string()).max(20).optional(),
   repo_names: z.array(z.string()).max(20).optional(),
+  brief: z.string().max(LIMITS.briefChars).optional(),
 });
 
 export function mountProjects(app: Hono): void {

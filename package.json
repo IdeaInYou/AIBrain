@@ -15,6 +15,7 @@
     "init-index": "tsx scripts/init-index.ts",
     "reindex": "tsx scripts/reindex.ts",
     "test": "vitest run",
+    "eval": "tsx scripts/eval-recall.ts",
     "test:watch": "vitest"
   },
   "dependencies": {

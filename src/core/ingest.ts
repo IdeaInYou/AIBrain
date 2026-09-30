@@ -1,6 +1,7 @@
 import { LIMITS, config } from '../config.js';
 import { logger } from '../logger.js';
 import { recordEvent } from './events.js';
+import { patchProject } from './projects.js';
 import { remember } from './remember.js';
 import type { EpisodeBody, FactTally, MemorySource, MemoryType } from '../types.js';
 
@@ -21,6 +22,7 @@ export interface IngestInput {
   /** Attached to the episode only — facts carry their own refs if they have any. */
   refs?: string[];
   note?: string;
+  project_brief?: string;
 }
 
 export interface IngestResult {
@@ -28,6 +30,7 @@ export interface IngestResult {
   project: string;
   facts: FactTally;
   skipped: number;
+  brief_updated?: boolean;
 }
 
 /**
@@ -85,6 +88,12 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
       result.skipped++;
       logger.warn({ err: (err as Error).message, type: fact.type }, 'ingest: fact rejected');
     }
+  }
+
+  // `general` is a catch-all, not a project — a brief there would describe nothing.
+  if (input.project_brief?.trim() && project !== config.DEFAULT_PROJECT) {
+    await patchProject(project, { brief: input.project_brief });
+    result.brief_updated = true;
   }
 
   logger.info({ ...result.facts, skipped: result.skipped, project }, 'ingest complete');

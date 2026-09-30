@@ -26,8 +26,19 @@ project="${project:-general}"
 repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 
 # Assistant/user prose only — tool results would blow up the prompt for no gain.
-text="$(jq -r 'select(.type=="user" or .type=="assistant") | .message.content
-  | if type=="array" then map(select(.type=="text") | .text) | join("\n") else . end' \
+# Harness noise is stripped: system reminders and slash-command wrappers are not
+# the session's content, and meta entries are injected context, not dialogue.
+# `</transcript>` is removed so the text cannot close its own wrapper.
+text="$(jq -r 'select((.type=="user" or .type=="assistant") and (.isMeta != true))
+  | .type as $role
+  | .message.content
+  | (if type=="array" then map(select(.type=="text") | .text) | join("\n") else . end)
+  | gsub("<system-reminder>[\\s\\S]*?</system-reminder>"; "")
+  | gsub("<(command-name|command-message|command-args|local-command-stdout|local-command-caveat)>[\\s\\S]*?</\\1>"; "")
+  | gsub("\\[Request interrupted by user[^\\]]*\\]"; "")
+  | gsub("</?transcript>"; "")
+  | select(test("\\S"))
+  | "[\($role)] \(.)"' \
   "$transcript" 2>/dev/null | tail -c 120000)"
 
 # Too short to be worth a journal entry.
@@ -39,9 +50,11 @@ text="$(jq -r 'select(.type=="user" or .type=="assistant") | .message.content
   log="$HOME/.claude/memory-extract.log"
   say() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$log"; }
 
-  result="$(printf '%s\n\n---TRANSCRIPT---\n%s' \
-    "$(cat "$HOME/.claude/prompts/extract.txt")" "$text" \
-    | timeout 120 claude -p --output-format json --model "$MEMORY_EXTRACT_MODEL" 2>/dev/null \
+  brief="$(mem_get /api/projects 2>/dev/null | jq -r --arg p "$project" '.projects[]? | select(.slug == $p) | .brief // ""' 2>/dev/null)"
+
+  result="$(printf '%s\n\n---TRANSCRIPT---\n<transcript>\n%s\n</transcript>\n\nCURRENT PROJECT BRIEF (project: %s):\n%s\n' \
+    "$(cat "$HOME/.claude/prompts/extract.txt")" "$text" "$project" "${brief:-(empty)}" \
+    | timeout 120 claude -p --no-session-persistence --output-format json --model "$MEMORY_EXTRACT_MODEL" 2>/dev/null \
     | jq -r '.result // empty' \
     | sed -e 's/^```json//' -e 's/^```//' -e 's/```$//')"
 

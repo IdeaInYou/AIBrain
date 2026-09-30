@@ -11,6 +11,10 @@ Use it proactively, without being asked:
 3. Whenever the user states a decision, a preference, a durable fact about their systems or company, or an open todo, call memory_remember immediately. Do not ask permission and do not wait to be told to remember.
 4. When the user asks about something you do not recognize, call memory_recall before answering. Never say you have no information without searching first.
 5. If memory_recall returns nothing relevant, say so explicitly rather than guessing.
+6. Do not search for generic programming questions, or when the answer is already in this conversation or in the loaded summary. Use at most 3 memory_recall calls per turn; if they find nothing, stop and say so.
+7. If memory_remember returns "similar", check them: when one says the same thing or is now outdated, call memory_update on it with the corrected text instead of keeping both.
+
+What to store: only what still holds outside this conversation, written so it is understandable without it. A suggestion is not a decision until the user adopts it. Skip one-off instructions ("this time"), debugging noise, and anything you only repeated from memory.
 
 Never assume you remember something this server did not return.
 

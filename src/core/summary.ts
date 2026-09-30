@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import type { MemoryHit } from '../types.js';
 import { recordEvent } from './events.js';
+import { getProject } from './projects.js';
 import { allPreferences, earlierEpisodes, milestones, openTodos, recentEpisodes } from './memory.js';
 
 /** First sentence, so one session takes one line in the timeline. */
@@ -55,16 +56,19 @@ export async function buildSummary(opts: SummaryOptions = {}): Promise<string> {
   const project = opts.project?.trim() || undefined;
 
   const started = Date.now();
-  const [episodes, earlier, marks, todos, prefs] = await Promise.all([
+  const [episodes, earlier, marks, todos, prefs, projectDoc] = await Promise.all([
     recentEpisodes(days, maxEpisodes, project),
     earlierEpisodes(days, EARLIER_LIMIT, project),
     milestones(MILESTONE_LIMIT, project),
     openTodos(project),
-    allPreferences(),
+    allPreferences(project),
+    project ? getProject(project) : Promise.resolve(null),
   ]);
 
   const sections: string[] = [];
   const scope = project ? ` — ${project}` : '';
+
+  if (projectDoc?.brief) sections.push(`## Project brief${scope}\n${projectDoc.brief}`);
 
   sections.push(
     episodes.length

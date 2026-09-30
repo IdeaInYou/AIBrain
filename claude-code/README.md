@@ -23,7 +23,7 @@ MEMORY_EXTRACT_MODEL=haiku
 
 Merge `settings.hooks.json` into `~/.claude/settings.json` (user scope, so it
 applies in every repo). If that file already has a `hooks` key, merge the
-`SessionStart` and `Stop` arrays rather than replacing the object.
+`SessionStart`, `PreToolUse` and `Stop` arrays rather than replacing the object.
 
 Register the MCP server once per device:
 

@@ -29,6 +29,8 @@ const IngestSchema = z.object({
   /** Repo-relative note paths written by the Stop hook, attached to the episode. */
   refs: z.array(z.string()).max(LIMITS.maxRefs).default([]),
   note: z.string().max(LIMITS.noteChars).optional(),
+  /** Full replacement brief for the project; empty or absent means unchanged. */
+  project_brief: z.string().max(LIMITS.briefChars).optional(),
   source: z
     .object({
       kind: z.enum(SOURCE_KINDS).default('hook'),
@@ -87,7 +89,7 @@ export function mountIngest(app: Hono): void {
     }
 
     const body = parsed.data;
-    if (!body.episode && body.facts.length === 0) {
+    if (!body.episode && body.facts.length === 0 && !body.project_brief?.trim()) {
       return c.json({ error: 'nothing to ingest: provide episode, facts, or both' }, 400);
     }
 
@@ -98,6 +100,7 @@ export function mountIngest(app: Hono): void {
       ...(body.occurred_at ? { occurred_at: body.occurred_at } : {}),
       ...(body.refs.length ? { refs: body.refs } : {}),
       ...(body.note ? { note: body.note } : {}),
+      ...(body.project_brief?.trim() ? { project_brief: body.project_brief } : {}),
       ...(body.source
         ? {
             source: {

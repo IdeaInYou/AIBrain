@@ -73,6 +73,7 @@ export interface ProjectPatch {
   name?: string;
   aliases?: string[];
   repo_names?: string[];
+  brief?: string;
 }
 
 export async function patchProject(slug: string, patch: ProjectPatch): Promise<ProjectDoc> {
@@ -89,6 +90,9 @@ export async function patchProject(slug: string, patch: ProjectPatch): Promise<P
     name: patch.name ?? existing.name,
     aliases: patch.aliases ? [...new Set(patch.aliases)] : existing.aliases,
     repo_names: patch.repo_names ? [...new Set(patch.repo_names)] : existing.repo_names,
+    ...(patch.brief !== undefined
+      ? { brief: patch.brief.trim() || null, brief_updated_at: new Date().toISOString() }
+      : {}),
   };
 
   await osRequest('PUT', `/${INDEX.projects}/_doc/${encodeURIComponent(slug)}`, next, { refresh: 'wait_for' });

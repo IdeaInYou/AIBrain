@@ -32,6 +32,43 @@ export function parseSince(input?: string): string | undefined {
   return new Date(parsed).toISOString();
 }
 
+const DAY_MS = 86_400_000;
+const startOfDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+const WORD_NUM: Record<string, number> = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, ten: 10 };
+
+/**
+ * A time window named in the (English) query itself — "what did we decide last
+ * week about X". Only used when the caller passed no since/until: the hook
+ * callers send raw text and cannot extract dates themselves.
+ */
+export function parseTimeHint(query: string, now = new Date()): { since: string; until?: string } | null {
+  const q = query.toLowerCase();
+  const today = startOfDay(now);
+  const iso = (d: Date) => d.toISOString();
+
+  if (/\btoday\b/.test(q)) return { since: iso(today) };
+  if (/\byesterday\b/.test(q)) return { since: iso(new Date(today.getTime() - DAY_MS)), until: iso(today) };
+
+  const span = /\b(?:last|past)\s+(\d+|a|one|two|three|four|five|six|seven|ten)\s+(day|week|month)s?\b/.exec(q);
+  if (span) {
+    const n = Number(span[1]) || WORD_NUM[span[1]!] || 1;
+    const unit = { day: DAY_MS, week: 7 * DAY_MS, month: 30 * DAY_MS }[span[2] as 'day' | 'week' | 'month'];
+    return { since: iso(new Date(now.getTime() - n * unit)) };
+  }
+
+  // Monday-based weeks, UTC.
+  const weekStart = new Date(today.getTime() - ((today.getUTCDay() + 6) % 7) * DAY_MS);
+  if (/\bthis week\b/.test(q)) return { since: iso(weekStart) };
+  if (/\blast week\b/.test(q)) return { since: iso(new Date(weekStart.getTime() - 7 * DAY_MS)), until: iso(weekStart) };
+
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  if (/\bthis month\b/.test(q)) return { since: iso(monthStart) };
+  if (/\blast month\b/.test(q)) {
+    return { since: iso(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))), until: iso(monthStart) };
+  }
+  return null;
+}
+
 /** Context budget: see_also on the top 3 hits only, 3 neighbours each. */
 const SEE_ALSO_FOR = 3;
 const SEE_ALSO_MAX = 3;
@@ -77,6 +114,7 @@ export async function recall(input: RecallInput): Promise<RecalledHit[]> {
     ...(input.type?.length ? { type: input.type } : {}),
     ...(input.since ? { since: parseSince(input.since)! } : {}),
     ...(input.until ? { until: parseSince(input.until)! } : {}),
+    ...(!input.since && !input.until ? parseTimeHint(input.query) : {}),
   };
 
   const started = Date.now();
@@ -392,8 +430,10 @@ export async function openTodos(project?: string, size = 20): Promise<MemoryHit[
   return hits.map(toHit);
 }
 
-export async function allPreferences(size = 20): Promise<MemoryHit[]> {
-  const hits = await listMemories({ status: ['active'], type: ['preference'] }, size, [
+/** With a project: that project's preferences plus the cross-project ones in `general`. */
+export async function allPreferences(project?: string, size = 20): Promise<MemoryHit[]> {
+  const scope = project ? { project: [...new Set([project, config.DEFAULT_PROJECT])] } : {};
+  const hits = await listMemories({ status: ['active'], type: ['preference'], ...scope }, size, [
     { importance: 'desc' },
     { occurred_at: 'desc' },
   ]);

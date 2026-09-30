@@ -70,6 +70,8 @@ export const projectsMapping = {
       repo_names: { type: 'keyword' },
       aliases: { type: 'keyword' },
       last_activity: { type: 'date' },
+      brief: { type: 'text', index: false },
+      brief_updated_at: { type: 'date' },
     },
   },
 };
@@ -170,14 +172,23 @@ async function ensureMappings(): Promise<void> {
     },
   };
 
-  try {
-    await osRequest('PUT', `/${INDEX.memories}/_mapping`, additions);
-    logger.info({ index: INDEX.memories }, 'mappings up to date');
-  } catch (err) {
-    logger.warn(
-      { index: INDEX.memories, err: (err as Error).message },
-      'mapping update failed — a field may already be mapped with a conflicting type; reindex to fix',
-    );
+  const projectAdditions = {
+    properties: { brief: { type: 'text', index: false }, brief_updated_at: { type: 'date' } },
+  };
+
+  for (const [index, body] of [
+    [INDEX.memories, additions],
+    [INDEX.projects, projectAdditions],
+  ] as const) {
+    try {
+      await osRequest('PUT', `/${index}/_mapping`, body);
+      logger.info({ index }, 'mappings up to date');
+    } catch (err) {
+      logger.warn(
+        { index, err: (err as Error).message },
+        'mapping update failed — a field may already be mapped with a conflicting type; reindex to fix',
+      );
+    }
   }
 }
 

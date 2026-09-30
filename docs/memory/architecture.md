@@ -78,6 +78,7 @@
 - Events index records recalls, writes, latency, cache hits; /api/stats emits zero-result%, p50/p95 latency, verdicts on search quality <!-- k:metrics -->
 - Before Edit/Write/MultiEdit/Bash calls, memory-pretool.sh injects up to 4 lines of related work as JSON additionalContext, verified working on production. <!-- k:PreToolUse hook → additionalContext injection -->
 - recall() chains type-aware rerank followed by optional semantic rerank (applies only if metric threshold met) <!-- k:Search pipeline -->
+- memory_update sets a locked flag on the record it updates; remember(), deferred-todo merge, and merge-duplicates all treat locked records as exempt from automatic overwrite or removal <!-- k:locked flag -->
 <!-- memory:end Data flow -->
 
 ## Integrations
@@ -123,6 +124,7 @@
 - Zero-result percentage threshold (default 30) that triggers reranker activation in production <!-- k:SEMANTIC_RERANK_THRESHOLD -->
 - Registered in settings.json (install script previously omitted them, so they never fired); prior config backed up to ~/.claude/settings.json.bak-2026-09-30 <!-- k:PreToolUse hooks -->
 - New 0.85 cosine threshold controlling when a new todo is merged into an existing open todo instead of created separately <!-- k:TODO_MERGE_THRESHOLD -->
+- Optional query parameter on /api/recall that filters results below a given cosine similarity threshold <!-- k:/api/recall min_sim -->
 <!-- memory:end Config -->
 
 _Last auto-update: 2026-09-30 (session acf8fb1b)_

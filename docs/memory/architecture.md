@@ -38,6 +38,10 @@
 - Bulk memory import from NDJSON or CSV with auto-embedding and deduplication. <!-- k:src/http/routes/import.ts -->
 - SemanticReranker singleton with metric-gated bge-reranker-base activation (triggers when zero_result_pct > 30%) <!-- k:src/search/semantic-rerank.ts -->
 - Background task for automatic duplicate detection (cosine >0.95) and merge via supersede closure <!-- k:src/core/self-healing.ts -->
+- memory_remember now checks for near-duplicate/subsumed records before writing and returns a `similar` field so the caller can choose to update instead of creating a new record <!-- k:remember.ts -->
+- Stop hook extraction prompt rewritten to scrub hook-inserted memory from the transcript, avoid re-recording already-saved memories, forbid fabricated numbers, and capture dead ends separately <!-- k:memory-extract.sh -->
+- Server now generates and stores a short per-project brief, updated by the Stop hook only on material change, surfaced at session start <!-- k:project briefs -->
+- New npm run eval command runs a 22-query recall benchmark reporting hit@1, hit@3, and MRR <!-- k:eval harness -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -116,6 +120,8 @@
 - New env vars for semantic reranking (off by default, trigger at >30% zero-result), digest cadence, and bulk import parallelism. <!-- k:RERANKER_ENABLED, DIGEST_SCHEDULE, IMPORT_BATCH_SIZE -->
 - Boolean flag (default true) controlling whether bge-reranker-base model loads on startup <!-- k:SEMANTIC_RERANK_ENABLED -->
 - Zero-result percentage threshold (default 30) that triggers reranker activation in production <!-- k:SEMANTIC_RERANK_THRESHOLD -->
+- PreToolUse hooks are now actually registered in settings.json; previously the install script omitted this so they never fired <!-- k:PreToolUse hooks -->
+- New 0.85 cosine threshold controlling when a new todo is merged into an existing open todo instead of created separately <!-- k:TODO_MERGE_THRESHOLD -->
 <!-- memory:end Config -->
 
-_Last auto-update: 2026-09-08 (session c78a9a38)_
+_Last auto-update: 2026-09-30 (session acf8fb1b)_

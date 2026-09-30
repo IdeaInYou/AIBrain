@@ -27,21 +27,21 @@
 - PreToolUse hook on Edit/Write/MultiEdit; emits JSON additionalContext with file history via /api/file-context <!-- k:claude-code/hooks/memory-pretool.sh -->
 - PreToolUse hook on Bash, filtered to docker/traefik/deploy/migrate/opensearch; emits JSON additionalContext with relevant history <!-- k:claude-code/hooks/memory-pretool-bash.sh -->
 - Semantic reranking via bge-reranker-base (gated on >30% zero-result); composes with type-aware rerank <!-- k:src/core/rerank.ts -->
-- Daily/weekly memory summaries by project and date with fact/decision/todo highlights <!-- k:src/core/digest.ts -->
+- Rolling windows now computed from occurred_at instead of write time; errors no longer swallowed into empty results; entries no longer truncated <!-- k:src/core/digest.ts -->
 - Auto-detection and merge of duplicates (cosine ≥0.95) via scheduled tasks with cascade supersede <!-- k:src/core/selfHealing.ts -->
-- Bulk memory import from NDJSON/CSV with automatic embedding and deduplication <!-- k:src/core/imports.ts -->
+- Rewritten to go through the normal remember() path for correct embeddings, dedupe, related-links, and deferred-to-todo conversion; broken CSV parser removed <!-- k:src/core/imports.ts -->
 - Semantic reranking with bge-reranker-base model; RRF fusion of BM25 + kNN scores; activated on >30% zero-result <!-- k:src/core/reranker.ts -->
 - Auto-detect duplicates (cosine >0.95); merge + supersede without manual; background task <!-- k:src/core/selfHeal.ts -->
 - Semantic reranker with bge-reranker-base foundation, auto-activated when zero-result-pct >30%. <!-- k:src/http/routes/rerank.ts -->
 - Daily/weekly summary generation with highlights: top facts, decisions, todos, episodes by date and project. <!-- k:src/http/routes/digest.ts -->
 - Background task that finds duplicate records (cosine >0.95), merges them, and supersedes old versions without human intervention. <!-- k:src/http/routes/self-healing.ts -->
 - Bulk memory import from NDJSON or CSV with auto-embedding and deduplication. <!-- k:src/http/routes/import.ts -->
-- SemanticReranker singleton with metric-gated bge-reranker-base activation (triggers when zero_result_pct > 30%) <!-- k:src/search/semantic-rerank.ts -->
-- Background task for automatic duplicate detection (cosine >0.95) and merge via supersede closure <!-- k:src/core/self-healing.ts -->
+- Replaced with POST /api/maintenance/merge-duplicates, dry-run by default, cosine 0.95 threshold, same project/type only, episodes excluded, preserves refs/tags/importance onto the newer record <!-- k:src/core/self-healing.ts -->
 - memory_remember now checks for near-duplicate/subsumed records before writing and returns a `similar` field so the caller can choose to update instead of creating a new record <!-- k:remember.ts -->
 - Stop hook extraction prompt rewritten to scrub hook-inserted memory from the transcript, avoid re-recording already-saved memories, forbid fabricated numbers, and capture dead ends separately <!-- k:memory-extract.sh -->
 - Server now generates and stores a short per-project brief, updated by the Stop hook only on material change, surfaced at session start <!-- k:project briefs -->
 - New npm run eval command runs a 22-query recall benchmark reporting hit@1, hit@3, and MRR <!-- k:eval harness -->
+- Server-side per-project brief updated by the Stop hook only on significant change, merged into remember() and shown at SessionStart <!-- k:Project briefs -->
 <!-- memory:end Modules -->
 
 ## Data flow
@@ -94,7 +94,6 @@
 - PreToolUse hook injects file context (earlier work on the file) via additionalContext JSON; Bash hook filters to ops (docker/traefik/deploy/migrat) <!-- k:Pre-tool recall -->
 - PKCE S256, DCR (clients self-register), password-protected consent, token rotation with refresh-token family revocation, 1h idle expiry for sessions <!-- k:OAuth 2.0 service -->
 - contextum_search tool queries .contextum/ coordination state; added via npm package with string matching on tasks, agents, locks <!-- k:Contextum MCP Bridge -->
-- contextum NPM package; MCP tool for querying .contextum/ coordination state (tasks, locks, agents) <!-- k:Contextum -->
 - DCR + static-bearer fallback; works on web, mobile, Desktop, Code; state in oauth index; PUBLIC_URL enables it <!-- k:OAuth 2.0 -->
 - contextum_search tool queries .contextum/ state (tasks, locks, agents) to enable multi-agent coordination and conflict avoidance. <!-- k:Contextum coordination center -->
 <!-- memory:end Integrations -->

@@ -14,7 +14,6 @@ import { mountStats } from './routes/stats.js';
 import { mountSummary } from './routes/summary.js';
 import { mountDigest } from './routes/digest.js';
 import { mountImports } from './routes/imports.js';
-import { mountSelfHealing } from './routes/self-healing.js';
 
 /** Constant-time compare so a wrong token cannot be discovered byte by byte. */
 function isStaticToken(presented: string): boolean {
@@ -69,7 +68,6 @@ export function createApp(): Hono {
   mountMaintenance(app);
   mountDigest(app);
   mountImports(app);
-  mountSelfHealing(app);
 
   app.onError((err, c) => {
     logger.error({ err: err.message, path: c.req.path }, 'request failed');

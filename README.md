@@ -397,6 +397,11 @@ Bearer token or OAuth access token on everything except `/health` and the OAuth 
 | `GET` | `/api/projects` | project list with `last_activity` |
 | `PUT` | `/api/projects/:slug` | `{name?, aliases?, repo_names?}` — teach it your git remotes |
 | `GET` | `/api/stats?days=` | usage metrics and warnings |
+| `GET` | `/api/digest?period=daily\|weekly&project=&format=md\|json` | rolling 24 h / 7 d window by `occurred_at` |
+| `POST` | `/api/imports` | `{records: [...]}` or an NDJSON body, ≤ 500 records; each goes through `remember()` (dedupe, links, deferred→todo) |
+| `POST` | `/api/maintenance/merge-duplicates` | `{project?, threshold?=0.95, limit?=500, apply?}` — dry run unless `apply: true`; same project + type only, never episodes |
+| `POST` | `/api/maintenance/dedupe-episodes` | `{project?, apply?}` — collapse pre-session-dedupe episode duplicates; dry run by default |
+| `GET` | `/api/maintenance/similar?threshold=&type=&project=` | pairwise cosine audit for calibrating thresholds |
 | `GET` | `/health` | no auth; OpenSearch plus embedder readiness |
 | — | `/.well-known/oauth-*`, `/oauth/*` | no auth; discovery, registration, authorize, token, revoke |
 
@@ -508,6 +513,6 @@ Three places where the implementation deliberately differs from the specificatio
 From the design documents, in the order they are worth doing:
 
 - **Reranker** (`bge-reranker-base`) and **chunked note search**. Both gated on `free -m` showing at least 800 MB spare after OpenSearch and the embedder are warm — and on `/api/stats` showing that ranking, rather than missing data, is the problem.
-- **Weekly digest** delivered to Telegram, plus a nightly **self-healing** pass (episodes without refs, todos older than 60 days, contradictory decisions, `general` overflow).
+- **Digest delivery** (Telegram) — the digest itself is `/api/digest`. A **scheduled self-healing** pass (episodes without refs, todos older than 60 days, contradictory decisions, `general` overflow) — today only the manual `merge-duplicates` exists.
 - **claude.ai chat import** from an account export.
 - **Calendar and Gmail** ingestion as a separate worker.

@@ -1,66 +1,50 @@
-import { Hono } from 'hono';
-import { importMemories, importFromNDJSON, importFromCSV, type ImportRecord } from '../../core/imports.js';
-import { logger } from '../../logger.js';
+import type { Hono } from 'hono';
+import * as z from 'zod';
+import { LIMITS } from '../../config.js';
+import { importMemories } from '../../core/imports.js';
+import { MEMORY_TYPES } from '../../types.js';
 
+const RecordSchema = z.object({
+  content: z.string().max(LIMITS.contentChars).optional(),
+  type: z.enum(MEMORY_TYPES),
+  project: z.string().optional(),
+  tags: z.array(z.string()).max(6).optional(),
+  importance: z.number().int().min(1).max(5).optional(),
+  refs: z.array(z.string()).max(LIMITS.maxRefs).optional(),
+  occurred_at: z.string().optional(),
+  episode: z
+    .object({
+      did: z.string().optional(),
+      why: z.string().optional(),
+      outcome: z.string().optional(),
+      deferred: z.string().optional(),
+      files: z.array(z.string()).max(10).optional(),
+    })
+    .optional(),
+});
+
+const MAX_RECORDS = 500;
+
+/** JSON body `{ records: [...] }`, or an NDJSON body with one record per line. */
 export function mountImports(app: Hono): void {
   app.post('/api/imports', async c => {
+    const isNdjson = (c.req.header('content-type') ?? '').includes('ndjson');
+    let raw: unknown[];
     try {
-      const body = await c.req.json<{
-        records?: ImportRecord[];
-        format?: 'json' | 'ndjson' | 'csv';
-        data?: string;
-      }>();
-
-      if (body.records && Array.isArray(body.records)) {
-        // Direct JSON records
-        const result = await importMemories(body.records);
-        logger.info(result, 'bulk import via JSON');
-        return c.json(result);
-      }
-
-      if (body.data && body.format) {
-        // Format conversion
-        let result;
-        if (body.format === 'ndjson') {
-          result = await importFromNDJSON(body.data);
-        } else if (body.format === 'csv') {
-          result = await importFromCSV(body.data);
-        } else {
-          throw new Error(`Unsupported format: ${body.format}`);
-        }
-        logger.info(result, `bulk import via ${body.format}`);
-        return c.json(result);
-      }
-
-      throw new Error('Either records array or (data + format) required');
-    } catch (err) {
-      logger.error({ err }, 'import failed');
-      throw err;
+      raw = isNdjson
+        ? (await c.req.text())
+            .split('\n')
+            .map(l => l.trim())
+            .filter(Boolean)
+            .map(l => JSON.parse(l) as unknown)
+        : ((await c.req.json()) as { records?: unknown[] }).records ?? [];
+    } catch {
+      return c.json({ error: 'body is not valid JSON / NDJSON' }, 400);
     }
-  });
 
-  app.get('/api/imports/sample', c => {
-    const samples = {
-      json: [
-        {
-          content: 'Example fact about memory system architecture',
-          type: 'fact',
-          project: 'aibrain',
-          importance: 4,
-          tags: ['architecture', 'core'],
-        },
-        {
-          content: 'Decision to use cosine similarity threshold of 0.82',
-          type: 'decision',
-          project: 'aibrain',
-        },
-      ],
-      ndjson: `{"content":"Fact 1","type":"fact","project":"aibrain"}
-{"content":"Fact 2","type":"fact","project":"aibrain","importance":4}`,
-      csv: `content,type,project,importance
-"Example fact",fact,aibrain,4
-"Another fact",fact,aibrain,3`,
-    };
-    return c.json(samples);
+    const parsed = z.array(RecordSchema).max(MAX_RECORDS).safeParse(raw);
+    if (!parsed.success) return c.json({ error: 'invalid records', issues: parsed.error.issues.slice(0, 10) }, 400);
+
+    return c.json(await importMemories(parsed.data));
   });
 }

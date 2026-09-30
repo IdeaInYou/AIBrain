@@ -2,7 +2,7 @@ import { INDEX } from '../config.js';
 import { logger } from '../logger.js';
 import { osRequest } from '../search/client.js';
 import { cosine } from '../search/dedupe.js';
-import type { MemoryDoc, MemoryType } from '../types.js';
+import { DEDUPED_TYPES, type MemoryDoc, type MemoryType } from '../types.js';
 
 interface Hit {
   _id: string;
@@ -140,4 +140,132 @@ export async function findSimilar(args: {
 
   pairs.sort((x, y) => y.cosine - x.cosine);
   return { scanned: docs.length, threshold: args.threshold, pairs };
+}
+
+/* --------------------------------------------------- duplicate merging */
+
+export interface MergeCandidate {
+  id: string;
+  project: string;
+  type: MemoryType;
+  occurred_at: string;
+  created_at: string;
+  embedding: number[];
+}
+
+export interface PlannedMerge {
+  keep: string;
+  drop: string;
+  cosine: number;
+}
+
+/**
+ * Which records to fold into which. Only same project + same type, closest
+ * pairs first; a record already dropped in this plan is never kept or dropped
+ * again, so chains resolve without cycles. The newer record wins — it is the
+ * later statement of the same thing.
+ */
+export function planMerges(docs: MergeCandidate[], threshold: number): PlannedMerge[] {
+  const pairs: PlannedMerge[] = [];
+  for (let i = 0; i < docs.length; i++) {
+    for (let j = i + 1; j < docs.length; j++) {
+      const a = docs[i]!;
+      const b = docs[j]!;
+      if (a.project !== b.project || a.type !== b.type) continue;
+      const sim = cosine(a.embedding, b.embedding);
+      if (sim < threshold) continue;
+      const aNewer = (a.occurred_at || a.created_at) > (b.occurred_at || b.created_at);
+      pairs.push({ keep: aNewer ? a.id : b.id, drop: aNewer ? b.id : a.id, cosine: Number(sim.toFixed(4)) });
+    }
+  }
+  pairs.sort((x, y) => y.cosine - x.cosine);
+
+  const dropped = new Set<string>();
+  const plan: PlannedMerge[] = [];
+  for (const p of pairs) {
+    if (dropped.has(p.keep) || dropped.has(p.drop)) continue;
+    dropped.add(p.drop);
+    plan.push(p);
+  }
+  return plan;
+}
+
+export interface MergeReport {
+  dry_run: boolean;
+  scanned: number;
+  threshold: number;
+  merges: (PlannedMerge & { keep_content: string; drop_content: string })[];
+}
+
+/**
+ * Folds near-identical facts/decisions/preferences/todos that slipped past
+ * write-time dedupe. Episodes are excluded: each session is its own record.
+ * The dropped record is superseded, not deleted; its refs, tags and importance
+ * move onto the kept one so no note link is lost.
+ */
+export async function mergeDuplicates(args: {
+  project?: string;
+  threshold: number;
+  limit: number;
+  dryRun: boolean;
+}): Promise<MergeReport> {
+  const filter: unknown[] = [{ term: { status: 'active' } }, { terms: { type: [...DEDUPED_TYPES] } }];
+  if (args.project) filter.push({ term: { project: args.project } });
+
+  const res = await osRequest<{ hits: { hits: Hit[] } }>('POST', `/${INDEX.memories}/_search`, {
+    size: args.limit,
+    _source: { excludes: ['note'] },
+    query: { bool: { filter } },
+    sort: [{ occurred_at: 'desc' }],
+  });
+
+  const byId = new Map(res.hits.hits.map(h => [h._id, h._source]));
+  const docs: MergeCandidate[] = res.hits.hits
+    .filter(h => Array.isArray(h._source.embedding) && h._source.embedding.length > 0)
+    .map(h => ({
+      id: h._id,
+      project: h._source.project,
+      type: h._source.type,
+      occurred_at: h._source.occurred_at,
+      created_at: h._source.created_at,
+      embedding: h._source.embedding,
+    }));
+
+  const plan = planMerges(docs, args.threshold);
+  const report: MergeReport = {
+    dry_run: args.dryRun,
+    scanned: docs.length,
+    threshold: args.threshold,
+    merges: plan.map(p => ({
+      ...p,
+      keep_content: byId.get(p.keep)!.content,
+      drop_content: byId.get(p.drop)!.content,
+    })),
+  };
+
+  if (!args.dryRun) {
+    for (const { keep, drop } of plan) {
+      const k = byId.get(keep)!;
+      const d = byId.get(drop)!;
+      // Chains (A→B→C) mutate `k` in place so later merges see accumulated fields.
+      k.refs = [...new Set([...(k.refs ?? []), ...(d.refs ?? [])])];
+      k.tags = [...new Set([...(k.tags ?? []), ...(d.tags ?? [])])];
+      k.importance = Math.max(k.importance, d.importance);
+      await osRequest('POST', `/${INDEX.memories}/_update/${keep}`, {
+        doc: { refs: k.refs, tags: k.tags, importance: k.importance },
+      });
+      await osRequest(
+        'POST',
+        `/${INDEX.memories}/_update/${drop}`,
+        { doc: { status: 'superseded', superseded_by: keep } },
+        { refresh: 'wait_for' },
+      );
+    }
+  }
+
+  logger.info(
+    { scanned: report.scanned, merges: plan.length, dry_run: args.dryRun },
+    args.dryRun ? 'maintenance: duplicate merge (dry run)' : 'maintenance: duplicates merged',
+  );
+  return report;
 }

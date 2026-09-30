@@ -246,7 +246,7 @@ The server is named `memory`, so tools render as `memory_*` and the prefix docum
 | `memory_summary` | **Entry point.** No required arguments (`project?`, `days?`). Returns the template chronology. |
 | `memory_recall` | Search. Query must be in English — the tool tells Claude to translate. Supports `since`/`until`. |
 | `memory_remember` | Write. `content` in English; `type=episode` takes a structured `episode` object; `refs`/`note` link repo files. |
-| `memory_update` | Amend by id; `status: "done"` closes a todo. |
+| `memory_update` | Amend by id; `status: "done"` closes a todo. The new version is `locked`: automatic dedupe and `merge-duplicates` never supersede it. |
 | `memory_forget` | **Permanent** delete by id or filter — no undo. |
 
 Every description is capped at 400 characters, enforced by a test.
@@ -393,13 +393,13 @@ Bearer token or OAuth access token on everything except `/health` and the OAuth 
 | `POST` | `/api/ingest/commit` | git `post-commit`; attaches to an episode or creates one |
 | `GET` | `/api/summary?project=&days=` | same text as `memory_summary`, as markdown, for `SessionStart` |
 | `GET` | `/api/file-context?path=&k=` | file history for the pre-tool hook |
-| `GET` | `/api/recall?q=&type=&k=` | search for the Bash hook |
+| `GET` | `/api/recall?q=&type=&k=&min_sim=` | search for the Bash hook; `min_sim` drops hits whose raw query↔record cosine is below it (hybrid scores are normalised per query, so they cannot say "nothing relevant") |
 | `GET` | `/api/projects` | project list with `last_activity` |
 | `PUT` | `/api/projects/:slug` | `{name?, aliases?, repo_names?, brief?}` — teach it your git remotes; `brief` (≤ 1500 chars) heads that project's summary |
 | `GET` | `/api/stats?days=` | usage metrics and warnings |
 | `GET` | `/api/digest?period=daily\|weekly&project=&format=md\|json` | rolling 24 h / 7 d window by `occurred_at` |
 | `POST` | `/api/imports` | `{records: [...]}` or an NDJSON body, ≤ 500 records; each goes through `remember()` (dedupe, links, deferred→todo) |
-| `POST` | `/api/maintenance/merge-duplicates` | `{project?, threshold?=0.95, limit?=500, apply?}` — dry run unless `apply: true`; same project + type only, never episodes |
+| `POST` | `/api/maintenance/merge-duplicates` | `{project?, threshold?=0.95, limit?=500, apply?}` — dry run unless `apply: true`; same project + type only, never episodes; never drops a `locked` record |
 | `POST` | `/api/maintenance/dedupe-episodes` | `{project?, apply?}` — collapse pre-session-dedupe episode duplicates; dry run by default |
 | `GET` | `/api/maintenance/similar?threshold=&type=&project=` | pairwise cosine audit for calibrating thresholds |
 | `GET` | `/health` | no auth; OpenSearch plus embedder readiness |

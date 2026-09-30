@@ -151,6 +151,7 @@ export interface MergeCandidate {
   occurred_at: string;
   created_at: string;
   embedding: number[];
+  locked?: boolean;
 }
 
 export interface PlannedMerge {
@@ -174,8 +175,10 @@ export function planMerges(docs: MergeCandidate[], threshold: number): PlannedMe
       if (a.project !== b.project || a.type !== b.type) continue;
       const sim = cosine(a.embedding, b.embedding);
       if (sim < threshold) continue;
-      const aNewer = (a.occurred_at || a.created_at) > (b.occurred_at || b.created_at);
-      pairs.push({ keep: aNewer ? a.id : b.id, drop: aNewer ? b.id : a.id, cosine: Number(sim.toFixed(4)) });
+      // Both locked: two deliberate corrections — a human decides, not this.
+      if (a.locked && b.locked) continue;
+      const aWins = a.locked || (!b.locked && (a.occurred_at || a.created_at) > (b.occurred_at || b.created_at));
+      pairs.push({ keep: aWins ? a.id : b.id, drop: aWins ? b.id : a.id, cosine: Number(sim.toFixed(4)) });
     }
   }
   pairs.sort((x, y) => y.cosine - x.cosine);
@@ -229,6 +232,7 @@ export async function mergeDuplicates(args: {
       occurred_at: h._source.occurred_at,
       created_at: h._source.created_at,
       embedding: h._source.embedding,
+      locked: h._source.locked === true,
     }));
 
   const plan = planMerges(docs, args.threshold);

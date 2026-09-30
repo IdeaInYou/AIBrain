@@ -62,6 +62,7 @@ export async function findByHash(hash: string, project: string, type: MemoryType
 export interface NearDuplicate {
   id: string;
   similarity: number;
+  locked: boolean;
 }
 
 /**
@@ -83,7 +84,7 @@ export async function findNearDuplicate(
     if (!stored) continue;
     const similarity = cosine(vector, stored);
     if (similarity >= threshold && (!best || similarity > best.similarity)) {
-      best = { id: hit._id, similarity };
+      best = { id: hit._id, similarity, locked: hit._source.locked === true };
     }
   }
   return best;
@@ -93,6 +94,7 @@ export interface Neighbor {
   id: string;
   content: string;
   embedding?: number[];
+  locked?: boolean;
 }
 
 export interface WritePlan {
@@ -134,7 +136,8 @@ export function planWrite(
       break;
     }
     if (n.similarity >= dedupeThreshold || (n.norm.length >= MIN_CONTAINED_CHARS && mine.includes(n.norm))) {
-      plan = { action: 'supersede', target };
+      // A locked record is a user correction: a restatement must not replace it.
+      plan = { action: n.locked ? 'contained' : 'supersede', target };
       break;
     }
   }

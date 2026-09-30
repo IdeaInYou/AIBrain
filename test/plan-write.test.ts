@@ -60,6 +60,18 @@ describe('planWrite', () => {
     expect(plan.similar.map(s => s.id)).toEqual(['near']);
   });
 
+  it('never supersedes a locked record — the restatement is folded into it instead', () => {
+    const plan = planWrite(
+      'AIBrain stores memories in OpenSearch.',
+      Q,
+      [{ ...n('fixed', 'Memories live in OpenSearch.', 10), locked: true }],
+      DEDUPE,
+      RELATED,
+    );
+    expect(plan.action).toBe('contained');
+    expect(plan.target?.id).toBe('fixed');
+  });
+
   it('does not count very short strings as containment', () => {
     const plan = planWrite('OpenSearch', Q, [n('a', 'AIBrain runs OpenSearch 2 on the VPS.', 40)], DEDUPE, RELATED);
     expect(plan.action).toBe('new');

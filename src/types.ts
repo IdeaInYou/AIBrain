@@ -54,6 +54,8 @@ export interface MemoryDoc {
   occurred_at: string;
   created_at: string;
   content_hash: string;
+  /** Set by memory_update: an explicit correction that automatic merging must never hide. */
+  locked?: boolean;
 }
 
 export interface MemoryHit {

@@ -29,9 +29,11 @@ export function mountFileContext(app: Hono): void {
       .map(t => t.trim())
       .filter((t): t is MemoryType => (MEMORY_TYPES as readonly string[]).includes(t));
 
+    const minRaw = Number(c.req.query('min_sim'));
     const hits = await recall({
       query: q,
       k,
+      ...(Number.isFinite(minRaw) && minRaw > 0 && minRaw <= 1 ? { minSimilarity: minRaw } : {}),
       ...(types.length ? { type: types } : {}),
       ...(c.req.query('project') ? { project: c.req.query('project')! } : {}),
     });
@@ -45,6 +47,7 @@ export function mountFileContext(app: Hono): void {
         project: h.project,
         summary: h.episode?.did?.trim() || h.content,
         ref: h.refs[0] ?? '',
+        ...(h.similarity !== undefined ? { similarity: h.similarity } : {}),
       })),
     });
   });

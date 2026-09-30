@@ -228,6 +228,10 @@ async function syncDeferredTodo(args: {
   // The same open item restated by a later session: replace the older todo
   // rather than stacking a near-copy next to it.
   const twin = await findNearDuplicate(embedding, 'todo', args.project, config.TODO_MERGE_THRESHOLD);
+  if (twin?.locked) {
+    logger.info({ session_id: args.sessionId, todo: twin.id }, 'deferred todo skipped: a locked todo already covers it');
+    return;
+  }
 
   const id = randomUUID();
   const timestamp = nowIso();
@@ -348,7 +352,12 @@ export async function remember(input: RememberInput): Promise<RememberResult> {
     ? planWrite(
         content,
         embedding,
-        neighbors.map(h => ({ id: h._id, content: h._source.content, embedding: h._source.embedding })),
+        neighbors.map(h => ({
+          id: h._id,
+          content: h._source.content,
+          embedding: h._source.embedding,
+          locked: h._source.locked === true,
+        })),
         config.DEDUPE_THRESHOLD,
         config.RELATED_THRESHOLD,
       )

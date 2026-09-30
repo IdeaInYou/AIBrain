@@ -161,6 +161,7 @@ async function ensureMappings(): Promise<void> {
       refs: { type: 'keyword' },
       related: { type: 'keyword' },
       note: { type: 'text', index: false },
+      locked: { type: 'boolean' },
       episode: {
         properties: {
           commits: {

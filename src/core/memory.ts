@@ -3,7 +3,7 @@ import { INDEX, LIMITS, config } from '../config.js';
 import { embedOne } from '../embed/embedder.js';
 import { logger } from '../logger.js';
 import { osRequest, statusOf } from '../search/client.js';
-import { contentHash } from '../search/dedupe.js';
+import { contentHash, cosine } from '../search/dedupe.js';
 import { listMemories, searchMemories, type RawHit } from '../search/hybrid.js';
 import { rerank } from '../search/rerank.js';
 import { findEpisodeBySession } from './remember.js';
@@ -99,11 +99,36 @@ export interface RecallInput {
   since?: string;
   until?: string;
   k?: number;
+  /**
+   * Drop hits whose cosine to the query is below this. Hybrid scores are
+   * min-max normalised per query, so the top hit always looks strong — only the
+   * raw cosine can say "nothing here is actually relevant".
+   */
+  minSimilarity?: number;
 }
 
 /** Recall result plus the neighbours of the strongest hits. */
 export interface RecalledHit extends MemoryHit {
   see_also?: SeeAlso[];
+  /** Raw query↔record cosine; present only when minSimilarity was requested. */
+  similarity?: number;
+}
+
+async function withSimilarity(vector: number[], hits: RecalledHit[], min: number): Promise<RecalledHit[]> {
+  if (hits.length === 0) return hits;
+  const res = await osRequest<{ docs: { _id: string; _source?: { embedding?: number[] } }[] }>(
+    'POST',
+    `/${INDEX.memories}/_mget`,
+    { ids: hits.map(h => h.id) },
+    { _source_includes: 'embedding' },
+  );
+  const byId = new Map(res.docs.map(d => [d._id, d._source?.embedding]));
+  return hits
+    .map(h => {
+      const emb = byId.get(h.id);
+      return { ...h, similarity: emb ? Number(cosine(vector, emb).toFixed(4)) : 0 };
+    })
+    .filter(h => h.similarity >= min);
 }
 
 export async function recall(input: RecallInput): Promise<RecalledHit[]> {
@@ -121,7 +146,8 @@ export async function recall(input: RecallInput): Promise<RecalledHit[]> {
   const vector = await embedOne(input.query, 'query');
   // Over-fetch so the type-aware rerank has room to reorder before truncating.
   const raw = await searchMemories({ query: input.query, vector, filters, k: k * 3 });
-  const hits: RecalledHit[] = rerank(raw.map(toHit)).slice(0, k);
+  const ranked: RecalledHit[] = rerank(raw.map(toHit)).slice(0, k);
+  const hits = input.minSimilarity !== undefined ? await withSimilarity(vector, ranked, input.minSimilarity) : ranked;
 
   // Only the top few: see_also on every hit would swamp the context budget.
   const byId = new Map(raw.map(h => [h._id, h._source.related ?? []]));
@@ -251,6 +277,7 @@ export async function updateMemory(input: UpdateInput): Promise<RememberResult> 
     superseded_by: null,
     created_at: new Date().toISOString(),
     content_hash: contentHash(content),
+    locked: true,
   };
 
   await osRequest('PUT', `/${INDEX.memories}/_doc/${newId}`, doc, { refresh: 'wait_for' });

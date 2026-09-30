@@ -30,6 +30,21 @@ describe('planMerges', () => {
     expect(planMerges([at('a', 0), at('b', 0, { type: 'decision' })], 0.95)).toEqual([]);
   });
 
+  it('keeps a locked record even when it is the older one', () => {
+    const plan = planMerges(
+      [
+        at('old', 0, { occurred_at: '2026-01-01T00:00:00Z', locked: true }),
+        at('new', 1, { occurred_at: '2026-02-01T00:00:00Z' }),
+      ],
+      0.95,
+    );
+    expect(plan).toEqual([{ keep: 'old', drop: 'new', cosine: expect.any(Number) }]);
+  });
+
+  it('never merges two locked records', () => {
+    expect(planMerges([at('a', 0, { locked: true }), at('b', 1, { locked: true })], 0.95)).toEqual([]);
+  });
+
   it('resolves a cluster of three without dropping the kept record', () => {
     const plan = planMerges(
       [

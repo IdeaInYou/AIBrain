@@ -53,6 +53,9 @@ FACT TYPES — pick carefully, most sessions produce 0–3 facts:
 - Every "content" must be understandable with no access to the conversation: name the project and
   the component, no "it", "this", or "the above".
 Max 5 facts. Use [] if none.
+The end of the input lists "FACTS ALREADY STORED FROM EARLIER IN THIS SESSION". Never return any of
+them again, not even reworded or merged with other details. Return only facts that are new since
+then, or one that corrects a listed fact. Usually that means [] or one or two facts.
 Set importance 4 or 5 only for architectural decisions, production incidents, or things that change how the project works.
 
 "project_brief" is the standing description of the project that is shown at the start of every

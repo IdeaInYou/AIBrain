@@ -52,8 +52,17 @@ text="$(jq -r 'select((.type=="user" or .type=="assistant") and (.isMeta != true
 
   brief="$(mem_get /api/projects 2>/dev/null | jq -r --arg p "$project" '.projects[]? | select(.slug == $p) | .brief // ""' 2>/dev/null)"
 
-  result="$(printf '%s\n\n---TRANSCRIPT---\n<transcript>\n%s\n</transcript>\n\nCURRENT PROJECT BRIEF (project: %s):\n%s\n' \
-    "$(cat "$HOME/.claude/prompts/extract.txt")" "$text" "$project" "${brief:-(empty)}" \
+  # The hook fires after every reply and re-reads the whole transcript, so each
+  # run would restate the same facts in new words. Facts already sent from this
+  # session are handed back to the model as "do not repeat".
+  seen_dir="$HOME/.claude/memory-sessions"
+  mkdir -p "$seen_dir" 2>/dev/null
+  find "$seen_dir" -type f -mtime +14 -delete 2>/dev/null
+  seen_file="$seen_dir/${session:-nosession}.txt"
+  seen="$(sed 's/^/- /' "$seen_file" 2>/dev/null)"
+
+  result="$(printf '%s\n\n---TRANSCRIPT---\n<transcript>\n%s\n</transcript>\n\nCURRENT PROJECT BRIEF (project: %s):\n%s\n\nFACTS ALREADY STORED FROM EARLIER IN THIS SESSION:\n%s\n' \
+    "$(cat "$HOME/.claude/prompts/extract.txt")" "$text" "$project" "${brief:-(empty)}" "${seen:-(none)}" \
     | timeout 120 claude -p --no-session-persistence --output-format json --model "$MEMORY_EXTRACT_MODEL" 2>/dev/null \
     | jq -r '.result // empty' \
     | sed -e 's/^```json//' -e 's/^```//' -e 's/```$//')"
@@ -123,7 +132,9 @@ text="$(jq -r 'select((.type=="user" or .type=="assistant") and (.isMeta != true
     ingest_body="$(jq -n --argjson r "$result" --arg p "$project" --arg s "$session" \
       --arg d "$DEVICE" --argjson refs "$refs_json" "$base_filter")"
   fi
-  printf '%s' "$ingest_body" | mem_post /api/ingest >>"$log" 2>&1 || true
+  if printf '%s' "$ingest_body" | mem_post /api/ingest >>"$log" 2>&1; then
+    jq -r '.facts[]?.content // empty' <<<"$result" >>"$seen_file" 2>/dev/null
+  fi
   printf '\n' >>"$log"
 
   # 5. Commit the notes — but never while the repo is mid-operation.
